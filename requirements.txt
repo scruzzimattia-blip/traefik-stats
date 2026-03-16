@@ -4,3 +4,4 @@ plotly
 jsonlines
 sqlalchemy
 psycopg2-binary
+watchdog

@@ -14,7 +14,6 @@ st.title("📊 Traefik Stats - PostgreSQL")
 
 # Database Configuration
 DB_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/traefik_stats")
-LOG_FILE = "/app/logs/access.log"
 
 # SQLAlchemy setup
 Base = declarative_base()
@@ -33,52 +32,18 @@ class AccessLog(Base):
 
 engine = create_engine(DB_URL)
 Session = sessionmaker(bind=engine)
-Base.metadata.create_all(engine)
-
-def load_logs_to_db():
-    if not os.path.exists(LOG_FILE):
-        return 0
-    
-    session = Session()
-    new_records = 0
-    try:
-        with open(LOG_FILE, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    # Simple duplicate check before inserting
-                    # Traefik logs usually have StartLocal
-                    log_entry = AccessLog(
-                        start_local=pd.to_datetime(data.get('StartLocal')),
-                        client_addr=data.get('ClientAddr'),
-                        request_method=data.get('RequestMethod'),
-                        request_path=data.get('RequestPath'),
-                        request_host=data.get('RequestHost'),
-                        entry_point=data.get('EntryPointName'),
-                        status_code=int(data.get('DownstreamStatus', 0)),
-                        duration=int(data.get('Duration', 0))
-                    )
-                    session.add(log_entry)
-                    session.commit()
-                    new_records += 1
-                except Exception:
-                    session.rollback()
-                    continue
-    finally:
-        session.close()
-    return new_records
-
-# Sidebar: Actions & Info
-if st.sidebar.button("🔄 Import New Logs"):
-    n = load_logs_to_db()
-    st.sidebar.success(f"Imported {n} new records.")
 
 # Query data from Postgres
 query = "SELECT * FROM access_logs ORDER BY start_local DESC"
-df = pd.read_sql(query, engine)
+try:
+    df = pd.read_sql(query, engine)
+except Exception:
+    df = pd.DataFrame()
 
 if df.empty:
-    st.warning("No data in database. Try 'Import New Logs' or check access.log.")
+    st.warning("No data in database. Ensure the worker is running and Traefik is logging.")
+    if st.button("Refresh"):
+        st.rerun()
 else:
     # Sidebar filters
     st.sidebar.header("Filters")
@@ -116,3 +81,6 @@ else:
 
     st.subheader("Latest Requests")
     st.dataframe(filtered_df.head(20))
+    
+    if st.button("Refresh"):
+        st.rerun()

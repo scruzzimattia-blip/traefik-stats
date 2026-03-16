@@ -12,16 +12,29 @@ services:
     networks:
       - proxy
 
+  worker:
+    build: .
+    container_name: traefik-stats-worker
+    restart: unless-stopped
+    depends_on:
+      - db
+    entrypoint: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
+    volumes:
+      - /home/mattia/proxy/traefik/access.log:/app/logs/access.log:ro
+    networks:
+      - proxy
+
   traefik-stats:
     build: .
     container_name: traefik-stats
     restart: unless-stopped
     depends_on:
       - db
+    entrypoint: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
-    volumes:
-      - /home/mattia/proxy/traefik/access.log:/app/logs/access.log:ro
     networks:
       - proxy
     ports:
