@@ -22,6 +22,8 @@ services:
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
       RETENTION_DAYS: 30
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      CROWDSEC_LAPI_KEY: ${CROWDSEC_LAPI_KEY}
     volumes:
       - /home/mattia/proxy/traefik/access.log:/app/logs/access.log:ro
       - /home/mattia/proxy/data/crowdsec/data/GeoLite2-City.mmdb:/app/geoip/city.mmdb:ro
@@ -38,6 +40,8 @@ services:
     entrypoint: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      CROWDSEC_LAPI_KEY: ${CROWDSEC_LAPI_KEY}
     volumes:
       - /home/mattia/proxy/data/crowdsec/data/GeoLite2-City.mmdb:/app/geoip/city.mmdb:ro
     networks:

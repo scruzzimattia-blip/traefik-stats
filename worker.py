@@ -5,6 +5,7 @@ import pandas as pd
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from models import init_db, SessionLocal, AccessLog
+from crowdsec import CrowdSecManager
 from user_agents import parse
 import logging
 import maxminddb
@@ -53,9 +54,11 @@ class GeoResolver:
         return res
 
 class LogHandler(FileSystemEventHandler):
-    def __init__(self, geo):
+    def __init__(self, geo, crowdsec=None):
         self.geo = geo
+        self.crowdsec = crowdsec
         self.last_pos = 0
+        self.blocked_ips_cache = set() # Avoid too many duplicate API calls in a short time
 
     def on_modified(self, event):
         if event.src_path == LOG_FILE: 
@@ -109,6 +112,11 @@ class LogHandler(FileSystemEventHandler):
                         if not attack: 
                             attack = self.check_rate_limit(session, ip)
                         
+                        if attack and self.crowdsec and ip not in self.blocked_ips_cache:
+                            # Automatic block in CrowdSec
+                            self.crowdsec.block_ip(ip, reason=f"Attack on path: {path}" if self.is_attack(path) else "Rate limited / Bruteforce")
+                            self.blocked_ips_cache.add(ip)
+                        
                         session.add(AccessLog(
                             start_local=log_time,
                             client_addr=ip,
@@ -159,9 +167,10 @@ def prune_logs():
 if __name__ == "__main__":
     init_db()
     geo = GeoResolver()
-    logger.info("Ultra Worker started (Enhanced Sync).")
+    crowdsec = CrowdSecManager()
+    logger.info("Ultra Worker started (Enhanced Sync + CrowdSec).")
     
-    handler = LogHandler(geo)
+    handler = LogHandler(geo, crowdsec)
     # Perform initial sync
     handler.process_new_lines()
     

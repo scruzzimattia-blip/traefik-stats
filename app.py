@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from models import engine, AccessLog
+from crowdsec import CrowdSecManager
 from sqlalchemy import select
 from datetime import datetime, timedelta
 
@@ -369,7 +370,10 @@ else:
             if not res.empty:
                 st.write(f"**IP Profile: {ip_in} | Country: {res.iloc[0]['country_name']} | Provider: {res.iloc[0]['asn']}**")
                 
-                col_inv1, col_inv2 = st.columns(2)
+                cs = CrowdSecManager()
+                cs_status = cs.get_ip_reputation(ip_in)
+                
+                col_inv1, col_inv2, col_inv3 = st.columns(3)
                 with col_inv1:
                     st.metric("Total Requests", len(res))
                     st.metric("Attack Events", len(res[res['is_attack'] == True]))
@@ -389,6 +393,21 @@ else:
                         st.error("🔥 **Intent:** Confirmed Malicious (Known Exploit Patterns)")
                     else:
                         st.success("✅ **Intent:** Likely Human / Legitimate Traffic")
+                
+                with col_inv3:
+                    st.markdown("#### 🛡️ CrowdSec Status")
+                    if cs_status:
+                        st.error(f"🚫 **Blocked:** {cs_status.get('type')} (Origin: {cs_status.get('origin')})")
+                        st.caption(f"Reason: {cs_status.get('reason')}")
+                        st.caption(f"Until: {cs_status.get('until')}")
+                    else:
+                        st.success("✅ **Not Blocked** in CrowdSec LAPI")
+                        if st.button("🚫 Manual Block in CrowdSec"):
+                            if cs.block_ip(ip_in, reason="Manual Block from Traefik God Mode"):
+                                st.success(f"IP {ip_in} blocked successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to block IP. Check CROWDSEC_LAPI_KEY.")
 
                 st.markdown(f"[Search on AbuseIPDB](https://www.abuseipdb.com/check/{ip_in}) | [Whois Lookup](https://who.is/whois-ip/ip-address/{ip_in})")
                 st.write("**Historical Requests**")
