@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, BigInteger, Boolean, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, BigInteger, Boolean, UniqueConstraint, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -20,7 +20,7 @@ class AccessLog(Base):
     asn = Column(String(20), index=True)
     
     # Request Data
-    request_method = Column(String(10))
+    request_method = Column(String(10), index=True)
     request_path = Column(String)
     request_host = Column(String, index=True)
     request_protocol = Column(String(10))
@@ -29,18 +29,21 @@ class AccessLog(Base):
     
     # Bot Detection
     is_bot = Column(Boolean, default=False, index=True)
-    browser_family = Column(String(50))
-    os_family = Column(String(50))
-    device_family = Column(String(50))
+    browser_family = Column(String(50), index=True)
+    os_family = Column(String(50), index=True)
+    device_family = Column(String(50), index=True)
 
     # Traefik Data
-    entry_point = Column(String(50))
+    entry_point = Column(String(50), index=True)
     status_code = Column(Integer, index=True)
-    duration = Column(BigInteger) # ns
-    content_size = Column(BigInteger) # bytes
+    duration = Column(BigInteger, index=True) # ns
+    content_size = Column(BigInteger, index=True) # bytes
     
     __table_args__ = (
         UniqueConstraint('start_local', 'client_addr', 'request_path', 'request_method', name='_req_uc'),
+        # Compound indexes for common dashboard filters
+        Index('idx_host_status', 'request_host', 'status_code'),
+        Index('idx_time_host', 'start_local', 'request_host'),
     )
 
 engine = create_engine(DB_URL)
