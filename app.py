@@ -41,6 +41,28 @@ if df_full.empty:
 else:
     # --- SIDEBAR ---
     st.sidebar.title("🎮 Command Center")
+    
+    # System Pulse Widget
+    with st.sidebar.expander("💓 System Pulse", expanded=True):
+        if not df_full.empty:
+            last_log = df_full.iloc[0]['start_local']
+            diff = (datetime.now() - last_log).total_seconds()
+            status_color = "🟢" if diff < 60 else "🟡" if diff < 300 else "🔴"
+            st.write(f"{status_color} **Worker:** {'Active' if diff < 300 else 'Stale'}")
+            st.caption(f"Last Log: {last_log.strftime('%H:%M:%S')}")
+            
+            # DB Stats
+            try:
+                from sqlalchemy import text
+                with engine.connect() as conn:
+                    db_size = conn.execute(text("SELECT pg_size_pretty(pg_database_size(current_database()))")).scalar()
+                    row_count = conn.execute(text("SELECT count(*) FROM access_logs")).scalar()
+                st.write(f"💾 **DB Size:** {db_size}")
+                st.write(f"📈 **Rows:** {row_count:,}")
+            except: pass
+        else:
+            st.error("🔴 Worker Offline")
+
     date_mode = st.sidebar.radio("Time Filter", ["Presets", "Custom Range"])
     now = datetime.now()
     df = df_full.copy()
@@ -71,7 +93,7 @@ else:
         df = df[df['is_attack'] == True]
 
     # --- TABS ---
-    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream", "🧪 Error Lab"])
+    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🛣️ Endpoints", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream", "🧪 Error Lab"])
 
     with tabs[0]:
         c1, c2, c3, c4 = st.columns(4)
@@ -187,6 +209,35 @@ else:
             st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True)
 
     with tabs[6]:
+        st.subheader("🛣️ Endpoint Analytics")
+        path_stats = df.groupby('request_path').agg({
+            'id': 'count',
+            'duration_ms': 'mean',
+            'status_code': lambda x: (x >= 400).mean() * 100,
+            'content_size': 'sum'
+        }).rename(columns={
+            'id': 'Hits',
+            'duration_ms': 'Avg Latency',
+            'status_code': 'Error %',
+            'content_size': 'Total Size'
+        }).sort_values('Hits', ascending=False)
+        
+        st.write("**Top Endpoints (Detailed)**")
+        st.dataframe(path_stats.style.format({
+            'Avg Latency': '{:.2f} ms',
+            'Error %': '{:.1f}%',
+            'Total Size': lambda x: f"{x/(1024**2):.2f} MB"
+        }), use_container_width=True)
+        
+        col_ee1, col_ee2 = st.columns(2)
+        with col_ee1:
+            st.write("**Slowest Endpoints**")
+            st.table(path_stats.sort_values('Avg Latency', ascending=False).head(10)['Avg Latency'])
+        with col_ee2:
+            st.write("**Most Unstable Endpoints**")
+            st.table(path_stats.sort_values('Error %', ascending=False).head(10)['Error %'])
+
+    with tabs[7]:
         st.subheader("🌐 Source & Referer Analysis")
         col_s1, col_s2 = st.columns(2)
         with col_s1:
@@ -202,7 +253,7 @@ else:
         entry_points = df['entry_point'].value_counts().reset_index()
         st.plotly_chart(px.bar(entry_points, x='entry_point', y='count', template="plotly_dark"), use_container_width=True)
 
-    with tabs[7]:
+    with tabs[8]:
         st.subheader("🤖 Client & Browser Analysis")
         col_c1, col_c2 = st.columns(2)
         with col_c1:
@@ -223,20 +274,41 @@ else:
         else:
             st.info("No significant bot activity detected in this range.")
 
-    with tabs[8]:
+    with tabs[9]:
         st.subheader("🕵️ Advanced IP Investigator")
         ip_in = st.text_input("Deep Audit IP Address...").strip()
         if ip_in:
             res = df_full[df_full['client_addr'] == ip_in]
             if not res.empty:
                 st.write(f"**IP Profile: {ip_in} | Country: {res.iloc[0]['country_name']} | Provider: {res.iloc[0]['asn']}**")
-                st.metric("Attack Count", len(res[res['is_attack'] == True]))
+                
+                col_inv1, col_inv2 = st.columns(2)
+                with col_inv1:
+                    st.metric("Total Requests", len(res))
+                    st.metric("Attack Events", len(res[res['is_attack'] == True]))
+                with col_inv2:
+                    # Heuristic Analysis
+                    st.markdown("#### 🧠 Heuristic Intent Analysis")
+                    unique_paths = res['request_path'].nunique()
+                    error_rate = (res['status_code'] >= 400).mean() * 100
+                    
+                    if res.iloc[0]['is_bot']:
+                        st.warning("🤖 **Identity:** Confirmed Bot/Crawler")
+                    elif error_rate > 50 and len(res) > 10:
+                        st.error("🚨 **Intent:** Likely Scanner/Bruteforcer (High Error Rate)")
+                    elif unique_paths > len(res) * 0.8 and len(res) > 5:
+                        st.error("🔎 **Intent:** Path Enumerator (High Path Variability)")
+                    elif len(res[res['is_attack'] == True]) > 0:
+                        st.error("🔥 **Intent:** Confirmed Malicious (Known Exploit Patterns)")
+                    else:
+                        st.success("✅ **Intent:** Likely Human / Legitimate Traffic")
+
                 st.markdown(f"[Search on AbuseIPDB](https://www.abuseipdb.com/check/{ip_in}) | [Whois Lookup](https://who.is/whois-ip/ip-address/{ip_in})")
                 st.write("**Historical Requests**")
                 st.dataframe(res[['start_local', 'request_method', 'request_host', 'request_path', 'status_code', 'is_attack']].head(100), use_container_width=True)
             else: st.warning("IP not found.")
 
-    with tabs[9]:
+    with tabs[10]:
         st.subheader("📺 God Mode Live Stream")
         st.caption("Latest 200 requests (updates every sync)")
         live_df = df_full[['start_local', 'client_addr', 'country_code', 'request_host', 'request_path', 'status_code', 'is_attack']].head(200)
@@ -248,7 +320,7 @@ else:
         with c_l2:
             st.download_button("Export as CSV", data=df.to_csv(index=False), file_name=f"traefik_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv")
 
-    with tabs[10]:
+    with tabs[11]:
         st.subheader("🧪 Error & 404 Lab")
         err_df = df[df['status_code'] >= 400]
         if not err_df.empty:
