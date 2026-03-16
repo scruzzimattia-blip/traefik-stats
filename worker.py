@@ -19,7 +19,6 @@ ASN_DB = "/app/geoip/asn.mmdb"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Basic Attack Patterns
 ATTACK_PATTERNS = [
     r"\.\./", r"etc/passwd", r"wp-login", r"sql", r"phpinfo", r"eval\(", 
     r"base64_", r"\.env", r"cmd\.exe", r"/proc/self/", r"<script>", r"SELECT%20"
@@ -54,10 +53,10 @@ class LogHandler(FileSystemEventHandler):
     def __init__(self, geo):
         self.geo = geo
         self.last_pos = 0
-        if os.path.exists(LOG_FILE): self.last_pos = os.path.getsize(LOG_FILE)
 
     def on_modified(self, event):
-        if event.src_path == LOG_FILE: self.process_new_lines()
+        if event.src_path == LOG_FILE: 
+            self.process_new_lines()
 
     def clean_ip(self, addr):
         if not addr: return ""
@@ -73,15 +72,23 @@ class LogHandler(FileSystemEventHandler):
 
     def process_new_lines(self):
         session = SessionLocal()
+        new_count = 0
         try:
             latest_db_entry = session.query(func.max(AccessLog.start_local)).scalar()
+            
+            if not os.path.exists(LOG_FILE):
+                return
+
             with open(LOG_FILE, 'r') as f:
                 f.seek(self.last_pos)
                 for line in f:
                     try:
                         data = json.loads(line)
                         log_time = pd.to_datetime(data.get('StartLocal'))
-                        if latest_db_entry and log_time <= latest_db_entry: continue
+                        
+                        # Use UTC for comparison if needed, but make sure types match
+                        if latest_db_entry and log_time.replace(tzinfo=None) <= latest_db_entry.replace(tzinfo=None):
+                            continue
                         
                         ip = self.clean_ip(data.get('ClientAddr', ''))
                         geo_info = self.geo.resolve(ip)
@@ -111,10 +118,16 @@ class LogHandler(FileSystemEventHandler):
                             duration=int(data.get('Duration', 0)),
                             content_size=int(data.get('DownstreamContentSize', 0))
                         ))
-                        session.commit()
-                    except:
+                        new_count += 1
+                        if new_count % 100 == 0:
+                            session.commit()
+                    except Exception as e:
                         session.rollback()
+                        continue
+                session.commit()
                 self.last_pos = f.tell()
+                if new_count > 0:
+                    logger.info(f"Processed {new_count} new log lines.")
         finally:
             session.close()
 
@@ -132,19 +145,27 @@ def prune_logs():
 if __name__ == "__main__":
     init_db()
     geo = GeoResolver()
-    logger.info("Ultra Worker started (Attack Detection enabled).")
+    logger.info("Ultra Worker started (Enhanced Sync).")
+    
     handler = LogHandler(geo)
-    handler.last_pos = 0
+    # Perform initial sync
     handler.process_new_lines()
+    
     observer = Observer()
+    # Watch the directory, not just the file, to be more reliable
     observer.schedule(handler, path=os.path.dirname(LOG_FILE), recursive=False)
     observer.start()
+    
     last_prune = time.time()
     try:
         while True:
+            # Also poll every 30 seconds as a fallback to watchdog
+            time.sleep(30)
+            handler.process_new_lines()
+            
             if time.time() - last_prune > 3600:
                 prune_logs()
                 last_prune = time.time()
-            time.sleep(1)
-    except KeyboardInterrupt: observer.stop()
+    except KeyboardInterrupt:
+        observer.stop()
     observer.join()
