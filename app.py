@@ -135,13 +135,13 @@ with tabs[0]:
             geo_counts = df.groupby('country_code').size().reset_index(name='Requests')
             geo_counts = geo_counts.merge(df[['country_code', 'country_name']].drop_duplicates(), on='country_code', how='left')
             st.plotly_chart(px.scatter_geo(geo_counts, locations="country_code", hover_name="country_name", size="Requests",
-                                         projection="natural earth", template="plotly_dark"), use_container_width=True)
+                                          projection="natural earth", template="plotly_dark"), use_container_width=True, key="geo_traffic_map")
         
         with col_d2:
             st.subheader("📊 Traffic Timeline")
             timeline = df.set_index('start_local').groupby(pd.Grouper(freq='5min')).size().reset_index(name='Requests')
             st.plotly_chart(px.area(timeline, x='start_local', y=timeline.columns[1:], template="plotly_dark", 
-                                  color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True)
+                                   color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True, key="traffic_timeline")
         
         # Schnelle Insights
         st.subheader("🚀 Quick Insights")
@@ -191,7 +191,7 @@ with tabs[1]:
         if not attack_df.empty:
             st.plotly_chart(px.scatter_geo(attack_df, locations="country_code", size="Attacks", hover_name="country_name",
                                           projection="natural earth", template="plotly_dark", color="Attacks",
-                                          color_continuous_scale="Reds"), use_container_width=True)
+                                          color_continuous_scale="Reds"), use_container_width=True, key="attack_map_security")
         else: 
             st.info("No geo-locatable attacks found.")
         
@@ -294,7 +294,7 @@ with tabs[2]:
                     )
                 )])
                 fig_sankey.update_layout(template="plotly_dark", font_size=12, height=600, margin=dict(l=10, r=10, t=10, b=10))
-                st.plotly_chart(fig_sankey, use_container_width=True)
+                st.plotly_chart(fig_sankey, use_container_width=True, key="sankey_diagram")
             else:
                 st.info("No data available for the current filters.")
 
@@ -303,9 +303,10 @@ with tabs[3]:
         attack_df = df[df['is_attack'] == True].groupby(['country_name', 'country_code']).size().reset_index(name='Attacks')
         if not attack_df.empty:
             st.plotly_chart(px.scatter_geo(attack_df, locations="country_code", size="Attacks", hover_name="country_name",
-                                         projection="natural earth", template="plotly_dark", color="Attacks",
-                                         color_continuous_scale="Reds"), use_container_width=True)
-        else: st.success("No geo-locatable attacks found.")
+                                          projection="natural earth", template="plotly_dark", color="Attacks",
+                                          color_continuous_scale="Reds"), use_container_width=True, key="attack_map_geoview")
+        else:
+            st.success("No geo-locatable attacks found.")
 
 with tabs[4]:
         st.subheader("🛡️ Detailed Security Audit")
@@ -325,7 +326,7 @@ with tabs[4]:
 with tabs[5]:
         st.subheader("🚀 Performance Metrics")
         st.write("**Average Latency per Host (ms)**")
-        st.plotly_chart(px.bar(df.groupby('request_host')['duration_ms'].mean().reset_index(), x='duration_ms', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True)
+        st.plotly_chart(px.bar(df.groupby('request_host')['duration_ms'].mean().reset_index(), x='duration_ms', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True, key="duration_by_host")
         
         col_p1, col_p2 = st.columns(2)
         with col_p1:
@@ -334,7 +335,7 @@ with tabs[5]:
             st.table(p95)
         with col_p2:
             st.write("**Response Size Distribution**")
-            st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True)
+            st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True, key="content_size_histogram")
 
 with tabs[6]:
         st.subheader("🛣️ Endpoint Analytics")
@@ -375,30 +376,30 @@ with tabs[7]:
         with col_s2:
             st.write("**Top Providers (ASN)**")
             asns = df['asn'].value_counts().head(10).reset_index()
-            st.plotly_chart(px.pie(asns, values='count', names='asn', template="plotly_dark"), use_container_width=True)
+            st.plotly_chart(px.pie(asns, values='count', names='asn', template="plotly_dark"), use_container_width=True, key="asn_pie_chart")
             
         st.write("**Top Entry Points**")
         entry_points = df['entry_point'].value_counts().reset_index()
-        st.plotly_chart(px.bar(entry_points, x='entry_point', y='count', template="plotly_dark"), use_container_width=True)
+        st.plotly_chart(px.bar(entry_points, x='entry_point', y='count', template="plotly_dark"), use_container_width=True, key="entry_points_bar_chart")
 
 with tabs[8]:
         st.subheader("🤖 Client & Browser Analysis")
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.write("**Browsers**")
-            st.plotly_chart(px.pie(df, names='browser_family', template="plotly_dark"), use_container_width=True)
+            st.plotly_chart(px.pie(df, names='browser_family', template="plotly_dark"), use_container_width=True, key="browser_family_pie_chart")
         with col_c2:
             st.write("**Operating Systems**")
-            st.plotly_chart(px.pie(df, names='os_family', template="plotly_dark"), use_container_width=True)
+            st.plotly_chart(px.pie(df, names='os_family', template="plotly_dark"), use_container_width=True, key="os_family_pie_chart")
         
         st.write("**Device Types**")
-        st.plotly_chart(px.bar(df['device_family'].value_counts().head(10), template="plotly_dark"), use_container_width=True)
+        st.plotly_chart(px.bar(df['device_family'].value_counts().head(10), template="plotly_dark"), use_container_width=True, key="device_family_bar_chart")
 
         st.write("**Top Detected Bots**")
         bot_df = df[df['is_bot'] == True]
         if not bot_df.empty:
             bot_counts = bot_df['browser_family'].value_counts().head(10).reset_index()
-            st.plotly_chart(px.bar(bot_counts, x='count', y='browser_family', orientation='h', template="plotly_dark", color='count'), use_container_width=True)
+            st.plotly_chart(px.bar(bot_counts, x='count', y='browser_family', orientation='h', template="plotly_dark", color='count'), use_container_width=True, key="bot_counts_bar_chart")
         else:
             st.info("No significant bot activity detected in this range.")
 
@@ -477,14 +478,14 @@ with tabs[11]:
             c_e1, c_e2 = st.columns(2)
             with c_e1:
                 st.write("**Errors by Host**")
-                st.plotly_chart(px.bar(err_df.groupby('request_host').size().reset_index(name='count'), x='count', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True)
+                st.plotly_chart(px.bar(err_df.groupby('request_host').size().reset_index(name='count'), x='count', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True, key="errors_by_host_bar_chart")
             with c_e2:
                 st.write("**Errors by Path**")
                 st.table(err_df['request_path'].value_counts().head(15))
             
             st.write("**Error Timeline (5-min buckets)**")
             err_timeline = err_df.set_index('start_local').groupby([pd.Grouper(freq='5min'), 'status_code']).size().unstack(fill_value=0).reset_index()
-            st.plotly_chart(px.line(err_timeline, x='start_local', y=err_timeline.columns[1:], template="plotly_dark"), use_container_width=True)
+            st.plotly_chart(px.line(err_timeline, x='start_local', y=err_timeline.columns[1:], template="plotly_dark"), use_container_width=True, key="error_timeline_line_chart")
         else:
             st.success("Clean sheets! No errors in the current selection.")
 
