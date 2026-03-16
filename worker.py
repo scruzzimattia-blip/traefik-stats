@@ -73,6 +73,12 @@ class LogHandler(FileSystemEventHandler):
             if re.search(p, path, re.IGNORECASE): return True
         return False
 
+    def check_rate_limit(self, session, ip):
+        """Check if an IP has made too many requests in the last minute."""
+        one_min_ago = datetime.now() - timedelta(minutes=1)
+        count = session.query(AccessLog).filter(AccessLog.client_addr == ip, AccessLog.start_local > one_min_ago).count()
+        return count > 120 # More than 2 requests per second over a minute
+
     def process_new_lines(self):
         session = SessionLocal()
         new_count = 0
@@ -98,6 +104,10 @@ class LogHandler(FileSystemEventHandler):
                         ua = parse(data.get('RequestUserAgent', ''))
                         path = data.get('RequestPath', '')
                         
+                        attack = self.is_attack(path)
+                        # Optional: also mark as attack if rate limited
+                        # if not attack: attack = self.check_rate_limit(session, ip)
+                        
                         session.add(AccessLog(
                             start_local=log_time,
                             client_addr=ip,
@@ -112,7 +122,7 @@ class LogHandler(FileSystemEventHandler):
                             request_referer=data.get('RequestReferer'),
                             request_user_agent=data.get('RequestUserAgent'),
                             is_bot=ua.is_bot,
-                            is_attack=self.is_attack(path),
+                            is_attack=attack,
                             browser_family=ua.browser.family,
                             os_family=ua.os.family,
                             device_family=ua.device.family,

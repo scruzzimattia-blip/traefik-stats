@@ -59,8 +59,19 @@ else:
     hosts = st.sidebar.multiselect("Active Hosts", options=sorted(df['request_host'].unique()), default=df['request_host'].unique())
     if hosts: df = df[df['request_host'].isin(hosts)]
 
+    status_groups = st.sidebar.multiselect("Status Groups", options=sorted(df['status_group'].unique()), default=df['status_group'].unique())
+    if status_groups: df = df[df['status_group'].isin(status_groups)]
+
+    methods = st.sidebar.multiselect("Methods", options=sorted(df['request_method'].unique()), default=df['request_method'].unique())
+    if methods: df = df[df['request_method'].isin(methods)]
+
+    if st.sidebar.checkbox("Hide Attack Traffic"):
+        df = df[df['is_attack'] == False]
+    if st.sidebar.checkbox("Show Attacks Only"):
+        df = df[df['is_attack'] == True]
+
     # --- TABS ---
-    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream"])
+    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream", "🧪 Error Lab"])
 
     with tabs[0]:
         c1, c2, c3, c4 = st.columns(4)
@@ -73,6 +84,15 @@ else:
         timeline = df.set_index('start_local').groupby([pd.Grouper(freq='1min'), 'status_group']).size().unstack(fill_value=0).reset_index()
         st.plotly_chart(px.area(timeline, x='start_local', y=timeline.columns[1:], template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True)
         
+        st.subheader("⚡ Traffic Heatmap (Hourly/Daily)")
+        heatmap_df = df.copy()
+        heatmap_df['hour'] = heatmap_df['start_local'].dt.hour
+        heatmap_df['day'] = heatmap_df['start_local'].dt.strftime('%A')
+        heatmap_data = heatmap_df.groupby(['day', 'hour']).size().unstack(fill_value=0)
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        heatmap_data = heatmap_data.reindex(days_order).fillna(0)
+        st.plotly_chart(px.imshow(heatmap_data, labels=dict(x="Hour of Day", y="Day of Week", color="Requests"), template="plotly_dark", color_continuous_scale="Viridis"), use_container_width=True)
+
         col_d1, col_d2 = st.columns(2)
         with col_d1:
             st.write("**Top Countries**")
@@ -174,9 +194,13 @@ else:
             referers = df['request_referer'].value_counts().head(15).reset_index()
             st.table(referers)
         with col_s2:
-            st.write("**Top Entry Points**")
-            entry_points = df['entry_point'].value_counts().reset_index()
-            st.plotly_chart(px.pie(entry_points, values='count', names='entry_point', template="plotly_dark"), use_container_width=True)
+            st.write("**Top Providers (ASN)**")
+            asns = df['asn'].value_counts().head(10).reset_index()
+            st.plotly_chart(px.pie(asns, values='count', names='asn', template="plotly_dark"), use_container_width=True)
+            
+        st.write("**Top Entry Points**")
+        entry_points = df['entry_point'].value_counts().reset_index()
+        st.plotly_chart(px.bar(entry_points, x='entry_point', y='count', template="plotly_dark"), use_container_width=True)
 
     with tabs[7]:
         st.subheader("🤖 Client & Browser Analysis")
@@ -190,6 +214,14 @@ else:
         
         st.write("**Device Types**")
         st.plotly_chart(px.bar(df['device_family'].value_counts().head(10), template="plotly_dark"), use_container_width=True)
+
+        st.write("**Top Detected Bots**")
+        bot_df = df[df['is_bot'] == True]
+        if not bot_df.empty:
+            bot_counts = bot_df['browser_family'].value_counts().head(10).reset_index()
+            st.plotly_chart(px.bar(bot_counts, x='count', y='browser_family', orientation='h', template="plotly_dark", color='count'), use_container_width=True)
+        else:
+            st.info("No significant bot activity detected in this range.")
 
     with tabs[8]:
         st.subheader("🕵️ Advanced IP Investigator")
@@ -206,9 +238,33 @@ else:
 
     with tabs[9]:
         st.subheader("📺 God Mode Live Stream")
-        st.caption("Latest 100 requests (updates every sync)")
-        st.dataframe(df_full[['start_local', 'client_addr', 'country_code', 'request_host', 'request_path', 'status_code', 'is_attack']].head(100), use_container_width=True)
-        if st.button("Manual Pulse"): st.rerun()
+        st.caption("Latest 200 requests (updates every sync)")
+        live_df = df_full[['start_local', 'client_addr', 'country_code', 'request_host', 'request_path', 'status_code', 'is_attack']].head(200)
+        st.dataframe(live_df, use_container_width=True)
+        
+        c_l1, c_l2 = st.columns(2)
+        with c_l1:
+            if st.button("Manual Pulse"): st.rerun()
+        with c_l2:
+            st.download_button("Export as CSV", data=df.to_csv(index=False), file_name=f"traefik_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv")
+
+    with tabs[10]:
+        st.subheader("🧪 Error & 404 Lab")
+        err_df = df[df['status_code'] >= 400]
+        if not err_df.empty:
+            c_e1, c_e2 = st.columns(2)
+            with c_e1:
+                st.write("**Errors by Host**")
+                st.plotly_chart(px.bar(err_df.groupby('request_host').size().reset_index(name='count'), x='count', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True)
+            with c_e2:
+                st.write("**Errors by Path**")
+                st.table(err_df['request_path'].value_counts().head(15))
+            
+            st.write("**Error Timeline (5-min buckets)**")
+            err_timeline = err_df.set_index('start_local').groupby([pd.Grouper(freq='5min'), 'status_code']).size().unstack(fill_value=0).reset_index()
+            st.plotly_chart(px.line(err_timeline, x='start_local', y=err_timeline.columns[1:], template="plotly_dark"), use_container_width=True)
+        else:
+            st.success("Clean sheets! No errors in the current selection.")
 
     st.sidebar.markdown("---")
     st.sidebar.caption(f"Last Pulse: {datetime.now().strftime('%H:%M:%S')}")
