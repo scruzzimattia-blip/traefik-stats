@@ -12,10 +12,12 @@ import maxminddb
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import re
+import requests
 
 LOG_FILE = "/app/logs/access.log"
 CITY_DB = "/app/geoip/city.mmdb"
 ASN_DB = "/app/geoip/asn.mmdb"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -58,7 +60,41 @@ class LogHandler(FileSystemEventHandler):
         self.geo = geo
         self.crowdsec = crowdsec
         self.last_pos = 0
-        self.blocked_ips_cache = set() # Avoid too many duplicate API calls in a short time
+        self.blocked_ips_cache = set() 
+        self.rate_limit_cache = {} # IP -> [timestamps]
+        self.last_cleanup = time.time()
+
+    def notify_discord(self, ip, reason, path, country_code):
+        if not DISCORD_WEBHOOK: return
+        try:
+            payload = {
+                "embeds": [{
+                    "title": "🚨 God Mode Protection",
+                    "description": f"IP `{ip}` has been blocked for malicious activity.",
+                    "color": 0xFF0000,
+                    "fields": [
+                        {"name": "Reason", "value": reason, "inline": True},
+                        {"name": "Path", "value": f"`{path}`", "inline": True},
+                        {"name": "Country", "value": country_code if country_code else "Unknown", "inline": True}
+                    ],
+                    "timestamp": datetime.now().isoformat()
+                }]
+            }
+            requests.post(DISCORD_WEBHOOK, json=payload, timeout=5)
+        except Exception as e: logger.error(f"Discord error: {e}")
+
+    def check_rate_limit(self, ip):
+        now = time.time()
+        # Periodically clean cache
+        if now - self.last_cleanup > 60:
+            self.rate_limit_cache = {k: [t for t in v if now - t < 60] for k, v in self.rate_limit_cache.items()}
+            self.rate_limit_cache = {k: v for k, v in self.rate_limit_cache.items() if v}
+            self.last_cleanup = now
+
+        if ip not in self.rate_limit_cache: self.rate_limit_cache[ip] = []
+        self.rate_limit_cache[ip].append(now)
+        # 60 requests in 60 seconds
+        return len([t for t in self.rate_limit_cache[ip] if now - t < 60]) > 60
 
     def on_modified(self, event):
         if event.src_path == LOG_FILE: 
@@ -76,12 +112,6 @@ class LogHandler(FileSystemEventHandler):
             if re.search(p, path, re.IGNORECASE): return True
         return False
 
-    def check_rate_limit(self, session, ip):
-        """Check if an IP has made too many requests in the last minute."""
-        one_min_ago = datetime.now() - timedelta(minutes=1)
-        count = session.query(AccessLog).filter(AccessLog.client_addr == ip, AccessLog.start_local > one_min_ago).count()
-        return count > 120 # More than 2 requests per second over a minute
-
     def process_new_lines(self):
         session = SessionLocal()
         new_count = 0
@@ -98,7 +128,6 @@ class LogHandler(FileSystemEventHandler):
                         data = json.loads(line)
                         log_time = pd.to_datetime(data.get('StartLocal'))
                         
-                        # Use UTC for comparison if needed, but make sure types match
                         if latest_db_entry and log_time.replace(tzinfo=None) <= latest_db_entry.replace(tzinfo=None):
                             continue
                         
@@ -108,13 +137,18 @@ class LogHandler(FileSystemEventHandler):
                         path = data.get('RequestPath', '')
                         
                         attack = self.is_attack(path)
+                        reason = f"Attack pattern: {path}" if attack else None
+                        
                         # Mark as attack if rate limited
                         if not attack: 
-                            attack = self.check_rate_limit(session, ip)
+                            if self.check_rate_limit(ip):
+                                attack = True
+                                reason = "Rate limited / Bruteforce"
                         
                         if attack and self.crowdsec and ip not in self.blocked_ips_cache:
                             # Automatic block in CrowdSec
-                            self.crowdsec.block_ip(ip, reason=f"Attack on path: {path}" if self.is_attack(path) else "Rate limited / Bruteforce")
+                            self.crowdsec.block_ip(ip, reason=reason)
+                            self.notify_discord(ip, reason, path, geo_info["country_code"])
                             self.blocked_ips_cache.add(ip)
                         
                         session.add(AccessLog(
@@ -168,21 +202,19 @@ if __name__ == "__main__":
     init_db()
     geo = GeoResolver()
     crowdsec = CrowdSecManager()
-    logger.info("Ultra Worker started (Enhanced Sync + CrowdSec).")
+    logger.info("Ultra Worker started (Enhanced Sync + CrowdSec + Discord).")
     
     handler = LogHandler(geo, crowdsec)
     # Perform initial sync
     handler.process_new_lines()
     
     observer = Observer()
-    # Watch the directory, not just the file, to be more reliable
     observer.schedule(handler, path=os.path.dirname(LOG_FILE), recursive=False)
     observer.start()
     
     last_prune = time.time()
     try:
         while True:
-            # Also poll every 30 seconds as a fallback to watchdog
             time.sleep(30)
             handler.process_new_lines()
             

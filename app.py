@@ -23,18 +23,22 @@ st.markdown("""
 st.title("⚡ Traefik God Mode Monitor")
 
 @st.cache_data(ttl=5)
-def fetch_data():
+def fetch_data(limit=50000):
     try:
-        query = select(AccessLog).order_by(AccessLog.start_local.desc())
+        query = select(AccessLog).order_by(AccessLog.start_local.desc()).limit(limit)
         df = pd.read_sql(query, engine)
         if not df.empty:
             df['start_local'] = pd.to_datetime(df['start_local'])
             df['duration_ms'] = df['duration'] / 1_000_000
             df['status_group'] = df['status_code'].apply(lambda x: f"{str(x)[0]}xx")
         return df
-    except: return pd.DataFrame()
+    except Exception as e: 
+        st.error(f"DB Error: {e}")
+        return pd.DataFrame()
 
-df_full = fetch_data()
+# Sidebar: Data Limit
+data_limit = st.sidebar.select_slider("Data Scan Depth", options=[1000, 10000, 50000, 100000], value=50000)
+df_full = fetch_data(limit=data_limit)
 
 if df_full.empty:
     st.warning("⚠️ No traffic data found. God Mode is waiting for logs...")
@@ -107,7 +111,7 @@ else:
         df = df[df['is_attack'] == True]
 
     # --- TABS ---
-    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🛣️ Endpoints", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream", "🧪 Error Lab", "🛡️ CrowdSec Hub", "🏥 System Health"])
+    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🛣️ Endpoints", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream", "🧪 Error Lab", "🚨 Security Log", "🛡️ CrowdSec Hub", "🏥 System Health"])
 
     with tabs[0]:
         c1, c2, c3, c4 = st.columns(4)
@@ -449,6 +453,15 @@ else:
             st.success("Clean sheets! No errors in the current selection.")
 
     with tabs[12]:
+        st.subheader("🚨 Malicious Activity Log")
+        atk_only = df[df['is_attack'] == True]
+        if not atk_only.empty:
+            st.warning(f"Found {len(atk_only)} security events in the current range.")
+            st.dataframe(atk_only[['start_local', 'client_addr', 'country_code', 'request_path', 'request_user_agent', 'asn']], use_container_width=True)
+        else:
+            st.success("No malicious activity detected in the current range.")
+
+    with tabs[13]:
         st.subheader("🛡️ CrowdSec Management Hub")
         cs = CrowdSecManager()
         
@@ -481,7 +494,7 @@ else:
             else:
                 st.info("No active decisions in CrowdSec.")
 
-    with tabs[13]:
+    with tabs[14]:
         st.subheader("🏥 System Health & Database")
         col_h1, col_h2 = st.columns(2)
         with col_h1:
