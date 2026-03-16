@@ -60,7 +60,7 @@ else:
     if hosts: df = df[df['request_host'].isin(hosts)]
 
     # --- TABS ---
-    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🕵️ Investigator", "📺 Live Stream"])
+    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream"])
 
     with tabs[0]:
         c1, c2, c3, c4 = st.columns(4)
@@ -72,6 +72,16 @@ else:
         st.subheader("Real-time Pulse")
         timeline = df.set_index('start_local').groupby([pd.Grouper(freq='1min'), 'status_group']).size().unstack(fill_value=0).reset_index()
         st.plotly_chart(px.area(timeline, x='start_local', y=timeline.columns[1:], template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True)
+        
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            st.write("**Top Countries**")
+            top_countries = df['country_name'].value_counts().head(10).reset_index()
+            st.plotly_chart(px.pie(top_countries, values='count', names='country_name', template="plotly_dark", hole=0.4), use_container_width=True)
+        with col_d2:
+            st.write("**Status Code Distribution**")
+            status_counts = df['status_code'].value_counts().reset_index()
+            st.plotly_chart(px.bar(status_counts, x='status_code', y='count', template="plotly_dark", color='status_code'), use_container_width=True)
 
     with tabs[1]:
         st.subheader("🧠 Smart Anomaly Detection")
@@ -98,28 +108,25 @@ else:
 
     with tabs[2]:
         st.subheader("🌊 Traffic Flow (Sankey)")
-        # Limit data for Sankey to keep it readable
-        s_df = df.sample(min(len(df), 1000))
-        # Prepare nodes and links: Country -> Host -> Status
-        all_nodes = list(s_df['country_code'].fillna('Unknown').unique()) + list(s_df['request_host'].unique()) + list(s_df['status_group'].unique())
-        node_map = {name: i for i, name in enumerate(all_nodes)}
-        
-        links = []
-        # Country to Host
-        c_h = s_df.groupby(['country_code', 'request_host']).size().reset_index(name='val')
-        for _, row in c_h.iterrows():
-            links.append(dict(source=node_map[row['country_code'] if pd.notna(row['country_code']) else 'Unknown'], target=node_map[row['request_host']], value=row['val']))
-        # Host to Status
-        h_s = s_df.groupby(['request_host', 'status_group']).size().reset_index(name='val')
-        for _, row in h_s.iterrows():
-            links.append(dict(source=node_map[row['request_host']], target=node_map[row['status_group']], value=row['val']))
+        if not df.empty:
+            s_df = df.sample(min(len(df), 2000))
+            all_nodes = list(s_df['country_code'].fillna('Unknown').unique()) + list(s_df['request_host'].unique()) + list(s_df['status_group'].unique())
+            node_map = {name: i for i, name in enumerate(all_nodes)}
             
-        fig_sankey = go.Figure(data=[go.Sankey(
-            node = dict(pad = 15, thickness = 20, line = dict(color = "black", width = 0.5), label = all_nodes, color = "rgba(0, 204, 150, 0.8)"),
-            link = dict(source = [l['source'] for l in links], target = [l['target'] for l in links], value = [l['value'] for l in links], color="rgba(255,255,255,0.1)")
-        )])
-        fig_sankey.update_layout(title_text="Global Traffic Flow", template="plotly_dark", font_size=10)
-        st.plotly_chart(fig_sankey, use_container_width=True)
+            links = []
+            c_h = s_df.groupby(['country_code', 'request_host']).size().reset_index(name='val')
+            for _, row in c_h.iterrows():
+                links.append(dict(source=node_map[row['country_code'] if pd.notna(row['country_code']) else 'Unknown'], target=node_map[row['request_host']], value=row['val']))
+            h_s = s_df.groupby(['request_host', 'status_group']).size().reset_index(name='val')
+            for _, row in h_s.iterrows():
+                links.append(dict(source=node_map[row['request_host']], target=node_map[row['status_group']], value=row['val']))
+                
+            fig_sankey = go.Figure(data=[go.Sankey(
+                node = dict(pad = 15, thickness = 20, line = dict(color = "black", width = 0.5), label = all_nodes, color = "rgba(0, 204, 150, 0.8)"),
+                link = dict(source = [l['source'] for l in links], target = [l['target'] for l in links], value = [l['value'] for l in links], color="rgba(255,255,255,0.1)")
+            )])
+            fig_sankey.update_layout(title_text="Global Traffic Flow", template="plotly_dark", font_size=10)
+            st.plotly_chart(fig_sankey, use_container_width=True)
 
     with tabs[3]:
         st.subheader("🌍 Security Map (Attacks Only)")
@@ -136,19 +143,55 @@ else:
         with c_a1:
             st.write("**Top Attack Paths**")
             st.table(df[df['is_attack'] == True]['request_path'].value_counts().head(15))
+            st.write("**Top 404 Not Found Paths**")
+            st.table(df[df['status_code'] == 404]['request_path'].value_counts().head(15))
         with c_a2:
             st.write("**Most Block-worthy IPs**")
             audit_ips = df[df['is_attack'] == True].groupby('client_addr').agg({'id':'count', 'country_code':'first', 'asn':'first'}).sort_values('id', ascending=False)
             st.dataframe(audit_ips, use_container_width=True)
+            st.write("**Suspicious User Agents**")
+            st.table(df[df['is_attack'] == True]['request_user_agent'].value_counts().head(10))
 
     with tabs[5]:
         st.subheader("🚀 Performance Metrics")
-        st.write("**Average Latency per Host**")
+        st.write("**Average Latency per Host (ms)**")
         st.plotly_chart(px.bar(df.groupby('request_host')['duration_ms'].mean().reset_index(), x='duration_ms', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True)
-        st.write("**Response Size Distribution**")
-        st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True)
+        
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.write("**P95 Latency by Host**")
+            p95 = df.groupby('request_host')['duration_ms'].quantile(0.95).reset_index(name='p95_ms')
+            st.table(p95)
+        with col_p2:
+            st.write("**Response Size Distribution**")
+            st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True)
 
     with tabs[6]:
+        st.subheader("🌐 Source & Referer Analysis")
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            st.write("**Top Referers**")
+            referers = df['request_referer'].value_counts().head(15).reset_index()
+            st.table(referers)
+        with col_s2:
+            st.write("**Top Entry Points**")
+            entry_points = df['entry_point'].value_counts().reset_index()
+            st.plotly_chart(px.pie(entry_points, values='count', names='entry_point', template="plotly_dark"), use_container_width=True)
+
+    with tabs[7]:
+        st.subheader("🤖 Client & Browser Analysis")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.write("**Browsers**")
+            st.plotly_chart(px.pie(df, names='browser_family', template="plotly_dark"), use_container_width=True)
+        with col_c2:
+            st.write("**Operating Systems**")
+            st.plotly_chart(px.pie(df, names='os_family', template="plotly_dark"), use_container_width=True)
+        
+        st.write("**Device Types**")
+        st.plotly_chart(px.bar(df['device_family'].value_counts().head(10), template="plotly_dark"), use_container_width=True)
+
+    with tabs[8]:
         st.subheader("🕵️ Advanced IP Investigator")
         ip_in = st.text_input("Deep Audit IP Address...").strip()
         if ip_in:
@@ -156,11 +199,12 @@ else:
             if not res.empty:
                 st.write(f"**IP Profile: {ip_in} | Country: {res.iloc[0]['country_name']} | Provider: {res.iloc[0]['asn']}**")
                 st.metric("Attack Count", len(res[res['is_attack'] == True]))
+                st.markdown(f"[Search on AbuseIPDB](https://www.abuseipdb.com/check/{ip_in}) | [Whois Lookup](https://who.is/whois-ip/ip-address/{ip_in})")
                 st.write("**Historical Requests**")
                 st.dataframe(res[['start_local', 'request_method', 'request_host', 'request_path', 'status_code', 'is_attack']].head(100), use_container_width=True)
             else: st.warning("IP not found.")
 
-    with tabs[7]:
+    with tabs[9]:
         st.subheader("📺 God Mode Live Stream")
         st.caption("Latest 100 requests (updates every sync)")
         st.dataframe(df_full[['start_local', 'client_addr', 'country_code', 'request_host', 'request_path', 'status_code', 'is_attack']].head(100), use_container_width=True)
