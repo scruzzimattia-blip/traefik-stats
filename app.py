@@ -66,7 +66,7 @@ else:
         st.subheader("Traffic Timeline (Requests per min)")
         df_resampled = df.set_index('start_local').resample('1min').size().reset_index(name='count')
         fig_timeline = px.line(df_resampled, x='start_local', y='count', color_discrete_sequence=['#00CC96'])
-        st.plotly_chart(fig_timeline, width='stretch')
+        st.plotly_chart(fig_timeline, use_container_width=True)
 
     with tab_traffic:
         col_left, col_right = st.columns(2)
@@ -76,18 +76,18 @@ else:
             host_counts = df['request_host'].value_counts().reset_index()
             host_counts.columns = ['Host', 'Count']
             fig_hosts = px.bar(host_counts, x='Count', y='Host', orientation='h', color='Count')
-            st.plotly_chart(fig_hosts, width='stretch')
+            st.plotly_chart(fig_hosts, use_container_width=True)
         
         with col_right:
             st.subheader("Top Paths")
             path_counts = df['request_path'].value_counts().head(15).reset_index()
             path_counts.columns = ['Path', 'Count']
             fig_paths = px.bar(path_counts, x='Count', y='Path', orientation='h')
-            st.plotly_chart(fig_paths, width='stretch')
+            st.plotly_chart(fig_paths, use_container_width=True)
 
         st.subheader("Latency Heatmap (ms)")
         fig_lat = px.histogram(df, x='duration_ms', nbins=50, title="Latency Distribution", color_discrete_sequence=['#AB63FA'])
-        st.plotly_chart(fig_lat, width='stretch')
+        st.plotly_chart(fig_lat, use_container_width=True)
 
     with tab_security:
         col_s1, col_s2 = st.columns(2)
@@ -98,7 +98,7 @@ else:
             status_dist.columns = ['Status', 'Count']
             fig_status = px.pie(status_dist, names='Status', values='Count', hole=0.4, 
                                 color_discrete_sequence=px.colors.qualitative.Set3)
-            st.plotly_chart(fig_status, width='stretch')
+            st.plotly_chart(fig_status, use_container_width=True)
 
         with col_s2:
             st.subheader("Non-200/300 Response Paths")
