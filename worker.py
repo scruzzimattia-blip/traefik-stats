@@ -26,9 +26,20 @@ class LogHandler(FileSystemEventHandler):
                 for line in f:
                     try:
                         data = json.loads(line)
+                        
+                        # Clean IP address (strip port)
+                        client_addr = data.get('ClientAddr', '')
+                        if ':' in client_addr:
+                            if client_addr.startswith('['):
+                                # IPv6 format: [2001:db8::1]:12345
+                                client_addr = client_addr.split(']')[0].replace('[', '')
+                            else:
+                                # IPv4 format: 1.2.3.4:12345
+                                client_addr = client_addr.rsplit(':', 1)[0]
+
                         log_entry = AccessLog(
                             start_local=pd.to_datetime(data.get('StartLocal')),
-                            client_addr=data.get('ClientAddr'),
+                            client_addr=client_addr,
                             request_method=data.get('RequestMethod'),
                             request_path=data.get('RequestPath'),
                             request_host=data.get('RequestHost'),
