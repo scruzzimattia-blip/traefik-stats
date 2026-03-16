@@ -149,26 +149,73 @@ else:
                 st.markdown(f'<div class="insight-card"><b>✅ System Stable</b><br>No significant error spikes or anomalies detected in the current range.</div>', unsafe_allow_html=True)
 
     with tabs[2]:
-        st.subheader("🌊 Traffic Flow (Sankey)")
-        if not df.empty:
-            s_df = df.sample(min(len(df), 2000))
-            all_nodes = list(s_df['country_code'].fillna('Unknown').unique()) + list(s_df['request_host'].unique()) + list(s_df['status_group'].unique())
-            node_map = {name: i for i, name in enumerate(all_nodes)}
-            
-            links = []
-            c_h = s_df.groupby(['country_code', 'request_host']).size().reset_index(name='val')
-            for _, row in c_h.iterrows():
-                links.append(dict(source=node_map[row['country_code'] if pd.notna(row['country_code']) else 'Unknown'], target=node_map[row['request_host']], value=row['val']))
-            h_s = s_df.groupby(['request_host', 'status_group']).size().reset_index(name='val')
-            for _, row in h_s.iterrows():
-                links.append(dict(source=node_map[row['request_host']], target=node_map[row['status_group']], value=row['val']))
+        st.subheader("🌊 Advanced Traffic Flow")
+        col_f1, col_f2 = st.columns([1, 3])
+        with col_f1:
+            st.write("**Flow Controls**")
+            sample_size = st.slider("Sample Size", 100, 5000, 1000)
+            show_asn = st.checkbox("Include Provider (ASN)", value=True)
+            st.caption("Heavier flows may take longer to render.")
+        
+        with col_f2:
+            if not df.empty:
+                s_df = df.sample(min(len(df), sample_size))
                 
-            fig_sankey = go.Figure(data=[go.Sankey(
-                node = dict(pad = 15, thickness = 20, line = dict(color = "black", width = 0.5), label = all_nodes, color = "rgba(0, 204, 150, 0.8)"),
-                link = dict(source = [l['source'] for l in links], target = [l['target'] for l in links], value = [l['value'] for l in links], color="rgba(255,255,255,0.1)")
-            )])
-            fig_sankey.update_layout(title_text="Global Traffic Flow", template="plotly_dark", font_size=10)
-            st.plotly_chart(fig_sankey, use_container_width=True)
+                # Define Layers
+                layers = ['country_code', 'request_host', 'status_group']
+                if show_asn: layers.insert(1, 'asn')
+                
+                # Build Sankey data
+                nodes = []
+                for layer in layers:
+                    nodes.extend(s_df[layer].fillna('Unknown').unique())
+                nodes = list(dict.fromkeys(nodes))
+                node_map = {name: i for i, name in enumerate(nodes)}
+                
+                links = []
+                # Helper for link coloring
+                color_map = {
+                    '2xx': 'rgba(0, 204, 150, 0.4)',
+                    '3xx': 'rgba(25, 211, 243, 0.4)',
+                    '4xx': 'rgba(239, 85, 59, 0.4)',
+                    '5xx': 'rgba(171, 100, 242, 0.4)'
+                }
+                
+                for i in range(len(layers) - 1):
+                    source_layer = layers[i]
+                    target_layer = layers[i+1]
+                    
+                    # Group by layers and include status_group for coloring if it's the last hop
+                    group_cols = [source_layer, target_layer, 'status_group']
+                    grouped = s_df.groupby(group_cols).size().reset_index(name='val')
+                    
+                    for _, row in grouped.iterrows():
+                        links.append(dict(
+                            source=node_map[row[source_layer] if pd.notna(row[source_layer]) else 'Unknown'],
+                            target=node_map[row[target_layer] if pd.notna(row[target_layer]) else 'Unknown'],
+                            value=row['val'],
+                            color=color_map.get(row['status_group'], 'rgba(255,255,255,0.1)')
+                        ))
+                
+                fig_sankey = go.Figure(data=[go.Sankey(
+                    node = dict(
+                        pad = 20, 
+                        thickness = 15, 
+                        line = dict(color = "black", width = 0.5), 
+                        label = nodes, 
+                        color = "rgba(0, 204, 150, 0.8)"
+                    ),
+                    link = dict(
+                        source = [l['source'] for l in links], 
+                        target = [l['target'] for l in links], 
+                        value = [l['value'] for l in links],
+                        color = [l['color'] for l in links]
+                    )
+                )])
+                fig_sankey.update_layout(template="plotly_dark", font_size=12, height=600, margin=dict(l=10, r=10, t=10, b=10))
+                st.plotly_chart(fig_sankey, use_container_width=True)
+            else:
+                st.info("No data available for the current filters.")
 
     with tabs[3]:
         st.subheader("🌍 Security Map (Attacks Only)")
