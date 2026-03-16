@@ -60,9 +60,8 @@ class LogHandler(FileSystemEventHandler):
         self.geo = geo
         self.crowdsec = crowdsec
         self.last_pos = 0
-        self.blocked_ips_cache = set() 
-        self.rate_limit_cache = {} # IP -> [timestamps]
-        self.last_cleanup = time.time()
+        self.blocked_ips_cache = set()
+        self.whitelist_hosts = {"cloud.scruzzi.com", "jellyfin.scruzzi.com"}
 
     def notify_discord(self, ip, reason, path, country_code):
         if not DISCORD_WEBHOOK: return
@@ -82,19 +81,6 @@ class LogHandler(FileSystemEventHandler):
             }
             requests.post(DISCORD_WEBHOOK, json=payload, timeout=5)
         except Exception as e: logger.error(f"Discord error: {e}")
-
-    def check_rate_limit(self, ip):
-        now = time.time()
-        # Periodically clean cache
-        if now - self.last_cleanup > 60:
-            self.rate_limit_cache = {k: [t for t in v if now - t < 60] for k, v in self.rate_limit_cache.items()}
-            self.rate_limit_cache = {k: v for k, v in self.rate_limit_cache.items() if v}
-            self.last_cleanup = now
-
-        if ip not in self.rate_limit_cache: self.rate_limit_cache[ip] = []
-        self.rate_limit_cache[ip].append(now)
-        # 60 requests in 60 seconds
-        return len([t for t in self.rate_limit_cache[ip] if now - t < 60]) > 60
 
     def on_modified(self, event):
         if event.src_path == LOG_FILE: 
@@ -135,15 +121,10 @@ class LogHandler(FileSystemEventHandler):
                         geo_info = self.geo.resolve(ip)
                         ua = parse(data.get('RequestUserAgent', ''))
                         path = data.get('RequestPath', '')
+                        host = data.get('RequestHost', '')
                         
                         attack = self.is_attack(path)
                         reason = f"Attack pattern: {path}" if attack else None
-                        
-                        # Mark as attack if rate limited
-                        if not attack: 
-                            if self.check_rate_limit(ip):
-                                attack = True
-                                reason = "Rate limited / Bruteforce"
                         
                         if attack and self.crowdsec and ip not in self.blocked_ips_cache:
                             # Automatic block in CrowdSec

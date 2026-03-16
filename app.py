@@ -111,89 +111,125 @@ else:
         df = df[df['is_attack'] == True]
 
     # --- TABS ---
-    tabs = st.tabs(["📊 Dashboard", "🧠 God Insights", "🌊 Traffic Flow", "🗺️ Security Map", "🛡️ Audit", "🚀 Performance", "🛣️ Endpoints", "🌐 Sources", "🤖 Clients", "🕵️ Investigator", "📺 Live Stream", "🧪 Error Lab", "🚨 Security Log", "🛡️ CrowdSec Hub", "🏥 System Health"])
+tabs = st.tabs(["📊 Dashboard", "🔒 Security", "📈 Performance", "🌐 Traffic", "🔍 Investigate", "🛡️ CrowdSec", "⚙️ System"])
 
-    with tabs[0]:
+with tabs[0]:
+        # Dashboard: Hauptübersicht
         c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Total Requests", f"{len(df):,}", delta=f"{len(df) - len(df_prev):+}" if not df_prev.empty else None)
+        with c2:
+            cur_atk = len(df[df['is_attack'] == True])
+            prev_atk = len(df_prev[df_prev['is_attack'] == True]) if not df_prev.empty else 0
+            delta_atk = f"{cur_atk - prev_atk:+}" if prev_atk > 0 else None
+            st.metric("🚨 Security Events", cur_atk, delta=delta_atk)
+        with c3:
+            st.metric("🌍 Countries", df['country_code'].nunique())
+        with c4:
+            st.metric("🏎️ Avg Latency", f"{df['duration_ms'].mean():.0f} ms" if not df.empty else "0 ms")
         
-        # Helper for deltas
-        def get_delta(current, prev):
-            if prev is None or prev == 0: return None
-            return f"{((current/prev)-1)*100:+.1f}%"
-
-        # Total Hits
-        cur_hits = len(df)
-        prev_hits = len(df_prev) if not df_prev.empty else 0
-        c1.metric("Total Hits", f"{cur_hits:,}", delta=get_delta(cur_hits, prev_hits))
-        
-        # Attack Volume
-        cur_atk = len(df[df['is_attack'] == True])
-        prev_atk = len(df_prev[df_prev['is_attack'] == True]) if not df_prev.empty else 0
-        c2.metric("Attack Volume", f"{cur_atk:,}", delta=get_delta(cur_atk, prev_atk), delta_color="inverse")
-        
-        # Unique IPs
-        cur_ips = df['client_addr'].nunique()
-        prev_ips = df_prev['client_addr'].nunique() if not df_prev.empty else 0
-        c3.metric("Unique IPs", f"{cur_ips:,}", delta=get_delta(cur_ips, prev_ips))
-        
-        # Bandwidth
-        cur_bw = df['content_size'].sum()/(1024**2)
-        prev_bw = df_prev['content_size'].sum()/(1024**2) if not df_prev.empty else 0
-        c4.metric("Bandwidth", f"{cur_bw:.2f} MB", delta=get_delta(cur_bw, prev_bw))
-
-        st.subheader("🌐 Real-time Global Pulse")
-        geo_counts = df.groupby(['country_name', 'country_code']).size().reset_index(name='Requests')
-        st.plotly_chart(px.scatter_geo(geo_counts, locations="country_code", hover_name="country_name", size="Requests",
-                                 projection="natural earth", template="plotly_dark", color="Requests",
-                                 color_continuous_scale=px.colors.sequential.Viridis), use_container_width=True)
-
-        st.subheader("Real-time Activity")
-        timeline = df.set_index('start_local').groupby([pd.Grouper(freq='1min'), 'status_group']).size().unstack(fill_value=0).reset_index()
-        st.plotly_chart(px.area(timeline, x='start_local', y=timeline.columns[1:], template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True)
-        
-        st.subheader("⚡ Traffic Heatmap (Hourly/Daily)")
-        heatmap_df = df.copy()
-        heatmap_df['hour'] = heatmap_df['start_local'].dt.hour
-        heatmap_df['day'] = heatmap_df['start_local'].dt.strftime('%A')
-        heatmap_data = heatmap_df.groupby(['day', 'hour']).size().unstack(fill_value=0)
-        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        heatmap_data = heatmap_data.reindex(days_order).fillna(0)
-        st.plotly_chart(px.imshow(heatmap_data, labels=dict(x="Hour of Day", y="Day of Week", color="Requests"), template="plotly_dark", color_continuous_scale="Viridis"), use_container_width=True)
-
+        # Globaler Überblick
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            st.write("**Top Countries**")
-            top_countries = df['country_name'].value_counts().head(10).reset_index()
-            st.plotly_chart(px.pie(top_countries, values='count', names='country_name', template="plotly_dark", hole=0.4), use_container_width=True)
-        with col_d2:
-            st.write("**Status Code Distribution**")
-            status_counts = df['status_code'].value_counts().reset_index()
-            st.plotly_chart(px.bar(status_counts, x='status_code', y='count', template="plotly_dark", color='status_code'), use_container_width=True)
-
-    with tabs[1]:
-        st.subheader("🧠 Smart Anomaly Detection")
-        col_i1, col_i2 = st.columns(2)
+            st.subheader("🌐 Global Traffic")
+            geo_counts = df.groupby('country_code').size().reset_index(name='Requests')
+            geo_counts = geo_counts.merge(df[['country_code', 'country_name']].drop_duplicates(), on='country_code', how='left')
+            st.plotly_chart(px.scatter_geo(geo_counts, locations="country_code", hover_name="country_name", size="Requests",
+                                         projection="natural earth", template="plotly_dark"), use_container_width=True)
         
+        with col_d2:
+            st.subheader("📊 Traffic Timeline")
+            timeline = df.set_index('start_local').groupby(pd.Grouper(freq='5min')).size().reset_index(name='Requests')
+            st.plotly_chart(px.area(timeline, x='start_local', y=timeline.columns[1:], template="plotly_dark", 
+                                  color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True)
+        
+        # Schnelle Insights
+        st.subheader("🚀 Quick Insights")
+        col_i1, col_i2 = st.columns(2)
         with col_i1:
-            # Insight: Path Scanners
-            scanners = df[df['status_code'] == 404].groupby('client_addr').size().sort_values(ascending=False).head(5)
-            if not scanners.empty:
-                st.markdown(f'<div class="insight-card"><b>🚨 Path Scanning Detected</b><br>IP <code>{scanners.index[0]}</code> has requested {scanners.values[0]} non-existent paths. Likely a bot/scanner.</div>', unsafe_allow_html=True)
+            # Top Hosts
+            top_hosts = df['request_host'].value_counts().head(5)
+            st.write("**Top Hosts**")
+            for host, count in top_hosts.items():
+                st.write(f"`{host}`: {count:,} requests")
             
-            # Insight: Bandwidth Hog
-            hogs = df.groupby('request_host')['content_size'].sum().sort_values(ascending=False).head(1)
-            st.markdown(f'<div class="insight-card"><b>💎 Resource Leader</b><br>Host <code>{hogs.index[0]}</code> is responsible for most traffic ({hogs.values[0]/(1024**2):.1f} MB).</div>', unsafe_allow_html=True)
-
+            # Error Rate
+            error_rate = (len(df[df['status_code'] >= 400]) / len(df) * 100) if len(df) > 0 else 0
+            st.write(f"**Error Rate:** {error_rate:.1f}%")
+        
         with col_i2:
-            # Insight: Error Spikes
-            recent_err = len(df[(df['start_local'] > (now - timedelta(minutes=30))) & (df['status_code'] >= 400)])
-            prev_err = len(df[(df['start_local'] > (now - timedelta(minutes=60))) & (df['start_local'] < (now - timedelta(minutes=30))) & (df['status_code'] >= 400)])
-            if recent_err > prev_err * 1.5 and recent_err > 10:
-                st.markdown(f'<div class="insight-card" style="border-left-color: #EF553B"><b>🔥 Error Spike</b><br>Errors increased by {((recent_err/max(1,prev_err))-1)*100:.0f}% in the last 30 minutes!</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="insight-card"><b>✅ System Stable</b><br>No significant error spikes or anomalies detected in the current range.</div>', unsafe_allow_html=True)
+            # Traffic by Status
+            status_groups = df['status_group'].value_counts()
+            st.write("**Status Distribution**")
+            for status, count in status_groups.head(5).items():
+                st.write(f"{status}: {count:,}")
+            
+            # Bot Traffic
+            bot_count = len(df[df['is_bot'] == True])
+            bot_pct = (bot_count / len(df) * 100) if len(df) > 0 else 0
+            st.write(f"**Bot Traffic:** {bot_count:,} ({bot_pct:.1f}%)")
 
-    with tabs[2]:
+with tabs[1]:
+        # Security Tab
+        st.subheader("🔒 Security Dashboard")
+        
+        # Security Metrics
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        with col_s1:
+            st.metric("🚨 Attacks", len(df[df['is_attack'] == True]))
+        with col_s2:
+            st.metric("🌍 Countries", df[df['is_attack'] == True]['country_code'].nunique())
+        with col_s3:
+            st.metric("🔴 Suspicious IPs", df[df['is_attack'] == True]['client_addr'].nunique())
+        with col_s4:
+            attack_rate = (len(df[df['is_attack'] == True]) / len(df) * 100) if len(df) > 0 else 0
+            st.metric("📊 Attack Rate", f"{attack_rate:.1f}%")
+        
+        # Security Map
+        st.subheader("🌍 Attack Geography")
+        attack_df = df[df['is_attack'] == True].groupby(['country_name', 'country_code']).size().reset_index(name='Attacks')
+        if not attack_df.empty:
+            st.plotly_chart(px.scatter_geo(attack_df, locations="country_code", size="Attacks", hover_name="country_name",
+                                          projection="natural earth", template="plotly_dark", color="Attacks",
+                                          color_continuous_scale="Reds"), use_container_width=True)
+        else: 
+            st.info("No geo-locatable attacks found.")
+        
+        # Security Details
+        sec_col1, sec_col2 = st.columns(2)
+        with sec_col1:
+            st.subheader("🛡️ Security Audit")
+            st.write("**Top Attack Paths**")
+            attack_paths = df[df['is_attack'] == True]['request_path'].value_counts().head(10)
+            if not attack_paths.empty:
+                st.table(attack_paths)
+            else:
+                st.info("No attack paths found")
+            
+            st.write("**Most Block-worthy IPs**")
+            audit_ips = df[df['is_attack'] == True].groupby('client_addr').agg({'id':'count', 'country_code':'first', 'asn':'first'}).sort_values('id', ascending=False)
+            if not audit_ips.empty:
+                st.dataframe(audit_ips.head(10), use_container_width=True)
+            else:
+                st.info("No suspicious IPs found")
+        
+        with sec_col2:
+            st.subheader("📋 Security Log")
+            atk_only = df[df['is_attack'] == True]
+            if not atk_only.empty:
+                st.warning(f"Found {len(atk_only)} security events")
+                st.dataframe(atk_only[['start_local', 'client_addr', 'country_code', 'request_path', 'request_user_agent', 'asn']].head(15), use_container_width=True)
+            else:
+                st.success("No malicious activity detected")
+            
+            st.write("**Suspicious User Agents**")
+            sus_agents = df[df['is_attack'] == True]['request_user_agent'].value_counts().head(10)
+            if not sus_agents.empty:
+                st.table(sus_agents)
+            else:
+                st.info("No suspicious user agents")
+
+with tabs[2]:
         st.subheader("🌊 Advanced Traffic Flow")
         col_f1, col_f2 = st.columns([1, 3])
         with col_f1:
@@ -262,7 +298,7 @@ else:
             else:
                 st.info("No data available for the current filters.")
 
-    with tabs[3]:
+with tabs[3]:
         st.subheader("🌍 Security Map (Attacks Only)")
         attack_df = df[df['is_attack'] == True].groupby(['country_name', 'country_code']).size().reset_index(name='Attacks')
         if not attack_df.empty:
@@ -271,7 +307,7 @@ else:
                                          color_continuous_scale="Reds"), use_container_width=True)
         else: st.success("No geo-locatable attacks found.")
 
-    with tabs[4]:
+with tabs[4]:
         st.subheader("🛡️ Detailed Security Audit")
         c_a1, c_a2 = st.columns(2)
         with c_a1:
@@ -286,7 +322,7 @@ else:
             st.write("**Suspicious User Agents**")
             st.table(df[df['is_attack'] == True]['request_user_agent'].value_counts().head(10))
 
-    with tabs[5]:
+with tabs[5]:
         st.subheader("🚀 Performance Metrics")
         st.write("**Average Latency per Host (ms)**")
         st.plotly_chart(px.bar(df.groupby('request_host')['duration_ms'].mean().reset_index(), x='duration_ms', y='request_host', orientation='h', template="plotly_dark"), use_container_width=True)
@@ -300,7 +336,7 @@ else:
             st.write("**Response Size Distribution**")
             st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True)
 
-    with tabs[6]:
+with tabs[6]:
         st.subheader("🛣️ Endpoint Analytics")
         path_stats = df.groupby('request_path').agg({
             'id': 'count',
@@ -329,7 +365,7 @@ else:
             st.write("**Most Unstable Endpoints**")
             st.table(path_stats.sort_values('Error %', ascending=False).head(10)['Error %'])
 
-    with tabs[7]:
+with tabs[7]:
         st.subheader("🌐 Source & Referer Analysis")
         col_s1, col_s2 = st.columns(2)
         with col_s1:
@@ -345,7 +381,7 @@ else:
         entry_points = df['entry_point'].value_counts().reset_index()
         st.plotly_chart(px.bar(entry_points, x='entry_point', y='count', template="plotly_dark"), use_container_width=True)
 
-    with tabs[8]:
+with tabs[8]:
         st.subheader("🤖 Client & Browser Analysis")
         col_c1, col_c2 = st.columns(2)
         with col_c1:
@@ -366,7 +402,7 @@ else:
         else:
             st.info("No significant bot activity detected in this range.")
 
-    with tabs[9]:
+with tabs[9]:
         st.subheader("🕵️ Advanced IP Investigator")
         ip_in = st.text_input("Deep Audit IP Address...").strip()
         if ip_in:
@@ -422,7 +458,7 @@ else:
                 st.dataframe(res[['start_local', 'request_method', 'request_host', 'request_path', 'status_code', 'is_attack']].head(100), use_container_width=True)
             else: st.warning("IP not found.")
 
-    with tabs[10]:
+with tabs[10]:
         st.subheader("📺 God Mode Live Stream")
         st.caption("Latest 200 requests (updates every sync)")
         live_df = df_full[['start_local', 'client_addr', 'country_code', 'request_host', 'request_path', 'status_code', 'is_attack']].head(200)
@@ -434,7 +470,7 @@ else:
         with c_l2:
             st.download_button("Export as CSV", data=df.to_csv(index=False), file_name=f"traefik_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv")
 
-    with tabs[11]:
+with tabs[11]:
         st.subheader("🧪 Error & 404 Lab")
         err_df = df[df['status_code'] >= 400]
         if not err_df.empty:
@@ -452,7 +488,7 @@ else:
         else:
             st.success("Clean sheets! No errors in the current selection.")
 
-    with tabs[12]:
+with tabs[12]:
         st.subheader("🚨 Malicious Activity Log")
         atk_only = df[df['is_attack'] == True]
         if not atk_only.empty:
@@ -461,7 +497,7 @@ else:
         else:
             st.success("No malicious activity detected in the current range.")
 
-    with tabs[13]:
+with tabs[13]:
         st.subheader("🛡️ CrowdSec Management Hub")
         cs = CrowdSecManager()
         
@@ -494,7 +530,7 @@ else:
             else:
                 st.info("No active decisions in CrowdSec.")
 
-    with tabs[14]:
+with tabs[14]:
         st.subheader("🏥 System Health & Database")
         col_h1, col_h2 = st.columns(2)
         with col_h1:
@@ -527,6 +563,6 @@ else:
                 st.cache_data.clear()
                 st.success("Cache cleared successfully.")
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption(f"Last Pulse: {datetime.now().strftime('%H:%M:%S')}")
-    if st.sidebar.button("⚡ Force Pulse"): st.rerun()
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Last Pulse: {datetime.now().strftime('%H:%M:%S')}")
+if st.sidebar.button("⚡ Force Pulse"): st.rerun()
