@@ -1,21 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from models import engine, AccessLog
-from sqlalchemy import select, func
+from sqlalchemy import select
 from datetime import datetime, timedelta
-import io
 
-# --- PAGE CONFIG ---
-st.set_page_config(
-    page_title="Traefik Ultimate Monitor Pro",
-    layout="wide",
-    page_icon="🛡️",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Traefik Ultimate Monitor Pro+", layout="wide", page_icon="🌐")
 
-# --- THEME STYLING ---
 st.markdown("""
 <style>
     [data-testid="stMetric"] { border: 1px solid rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.05); }
@@ -25,12 +16,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Traefik Ultimate Monitor Pro")
+st.title("🛡️ Traefik Ultimate Monitor Pro+")
 
 def format_bytes(size):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size < 1024.0:
-            return f"{size:.2f} {unit}"
+        if size < 1024.0: return f"{size:.2f} {unit}"
         size /= 1024.0
     return f"{size:.2f} PB"
 
@@ -41,24 +31,22 @@ def fetch_data():
         df = pd.read_sql(query, engine)
         if not df.empty:
             df['start_local'] = pd.to_datetime(df['start_local'])
-            df['duration_ms'] = df['duration'] / 1_000_000 # ns to ms
+            df['duration_ms'] = df['duration'] / 1_000_000
             df['hour'] = df['start_local'].dt.hour
             df['day_name'] = df['start_local'].dt.day_name()
             df['status_group'] = df['status_code'].apply(lambda x: f"{str(x)[0]}xx")
         return df
-    except Exception:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 df_full = fetch_data()
 
 if df_full.empty:
-    st.warning("⚠️ No traffic data found. Ensure the worker is running and Traefik is logging.")
-    if st.button("🔄 Check Again"):
-        st.rerun()
+    st.warning("⚠️ No traffic data found. Ensure the worker is running.")
+    if st.button("🔄 Refresh"): st.rerun()
 else:
-    # --- SIDEBAR ---
-    st.sidebar.title("🔍 Advanced Controls")
-    time_range = st.sidebar.selectbox("📅 Range", ["1h", "24h", "7d", "30d", "All Time"], index=1)
+    # SIDEBAR
+    st.sidebar.title("🌍 Filters")
+    time_range = st.sidebar.selectbox("Range", ["1h", "24h", "7d", "30d", "All"], index=1)
     
     now = datetime.now()
     df = df_full.copy()
@@ -67,90 +55,76 @@ else:
     elif time_range == "7d": df = df[df['start_local'] > (now - timedelta(days=7))]
     elif time_range == "30d": df = df[df['start_local'] > (now - timedelta(days=30))]
 
-    hosts = st.sidebar.multiselect("🌍 Hosts", options=sorted(df['request_host'].unique()), default=df['request_host'].unique())
+    show_bots = st.sidebar.toggle("Include Bots", value=True)
+    if not show_bots: df = df[df['is_bot'] == False]
+
+    hosts = st.sidebar.multiselect("Hosts", options=sorted(df['request_host'].unique()), default=df['request_host'].unique())
     if hosts: df = df[df['request_host'].isin(hosts)]
 
-    # CSV Export
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.sidebar.download_button("📥 Export CSV", data=csv, file_name=f"traefik_stats_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime='text/csv')
-
-    # --- MAIN TABS ---
-    tabs = st.tabs(["📊 Overview", "🚀 Performance", "🛡️ Security", "🤖 Clients & Bots", "🕵️ IP Investigator"])
+    # TABS
+    tabs = st.tabs(["📊 Overview", "📡 Geo & ASN", "🚀 Performance", "🛡️ Security", "🤖 Bots", "🕵️ Investigator", "📺 Live"])
 
     with tabs[0]:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Requests", f"{len(df):,}")
         c2.metric("Bandwidth", format_bytes(df['content_size'].sum()))
-        c3.metric("P95 Latency", f"{df['duration_ms'].quantile(0.95):.2f} ms")
-        success_rate = (df['status_code'] < 400).mean() * 100
-        c4.metric("Success Rate", f"{success_rate:.1f}%")
+        c3.metric("Avg Latency", f"{df['duration_ms'].mean():.2f} ms")
+        c4.metric("Success Rate", f"{(df['status_code'] < 400).mean()*100:.1f}%")
 
-        st.subheader("HTTP Status over Time")
+        st.subheader("Traffic Timeline")
         timeline = df.set_index('start_local').groupby([pd.Grouper(freq='1min'), 'status_group']).size().unstack(fill_value=0).reset_index()
-        fig_timeline = px.area(timeline, x='start_local', y=timeline.columns[1:], title="Status Code Volume (1min bins)", template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Pastel)
-        st.plotly_chart(fig_timeline, use_container_width=True)
+        st.plotly_chart(px.area(timeline, x='start_local', y=timeline.columns[1:], template="plotly_dark"), use_container_width=True)
 
-        st.subheader("Traffic Heatmap (Density)")
-        heat_data = df.groupby(['day_name', 'hour']).size().reset_index(name='count')
-        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        heat_pivot = heat_data.pivot(index='day_name', columns='hour', values='count').reindex(days_order)
-        fig_heat = px.imshow(heat_pivot, color_continuous_scale='Viridis', template="plotly_dark")
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.subheader("Service Health (Last 15m)")
+        recent = df_full[df_full['start_local'] > (now - timedelta(minutes=15))]
+        health_data = []
+        for h in df_full['request_host'].unique():
+            h_recent = recent[recent['request_host'] == h]
+            status = "🟢 Active" if len(h_recent) > 0 else "⚪ Inactive"
+            health_data.append({"Host": h, "Status": status, "Req (15m)": len(h_recent)})
+        st.table(pd.DataFrame(health_data))
 
     with tabs[1]:
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            st.subheader("Slowest Endpoints (Avg)")
-            slowest = df.groupby('request_path')['duration_ms'].agg(['mean', 'count']).sort_values('mean', ascending=False).head(15).reset_index()
-            fig_slow = px.bar(slowest, x='mean', y='request_path', labels={'mean':'Avg Latency (ms)'}, orientation='h', template="plotly_dark")
-            st.plotly_chart(fig_slow, use_container_width=True)
-        with col_p2:
-            st.subheader("Bandwidth per Host")
-            bw_host = df.groupby('request_host')['content_size'].sum().sort_values(ascending=False).reset_index()
-            bw_host['formatted'] = bw_host['content_size'].apply(format_bytes)
-            fig_bw = px.bar(bw_host, x='content_size', y='request_host', labels={'content_size':'Bytes'}, orientation='h', template="plotly_dark")
-            st.plotly_chart(fig_bw, use_container_width=True)
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            st.subheader("Top Countries")
+            country_stats = df['country_code'].value_counts().reset_index()
+            st.plotly_chart(px.bar(country_stats, x='count', y='country_code', orientation='h', template="plotly_dark"), use_container_width=True)
+        with col_g2:
+            st.subheader("Top ASN (Providers)")
+            asn_stats = df['asn'].value_counts().head(10).reset_index()
+            st.plotly_chart(px.pie(asn_stats, names='asn', values='count', hole=0.4, template="plotly_dark"), use_container_width=True)
 
     with tabs[2]:
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            st.subheader("Critical Errors (5xx)")
-            err_5xx = df[df['status_code'] >= 500]['request_path'].value_counts().head(10).reset_index()
-            if not err_5xx.empty: st.table(err_5xx)
-            else: st.success("No 500 errors detected!")
-        with col_s2:
-            st.subheader("Client Errors (4xx)")
-            err_4xx = df[(df['status_code'] >= 400) & (df['status_code'] < 500)]['request_path'].value_counts().head(10).reset_index()
-            st.table(err_4xx)
+        st.subheader("Slowest Endpoints")
+        slowest = df.groupby('request_path')['duration_ms'].agg(['mean', 'count']).sort_values('mean', ascending=False).head(15).reset_index()
+        st.plotly_chart(px.bar(slowest, x='mean', y='request_path', orientation='h', labels={'mean':'Avg ms'}, template="plotly_dark"), use_container_width=True)
 
     with tabs[3]:
-        c_bot1, c_bot2, c_bot3 = st.columns(3)
-        with c_bot1:
-            bot_data = df['is_bot'].map({True: '🤖 Bot', False: '👤 Human'}).value_counts().reset_index()
-            st.plotly_chart(px.pie(bot_data, names='is_bot', values='count', hole=0.4, title="Bot vs Human", template="plotly_dark"), use_container_width=True)
-        with c_bot2:
-            os_data = df['os_family'].value_counts().head(5).reset_index()
-            st.plotly_chart(px.pie(os_data, names='os_family', values='count', title="Top OS", template="plotly_dark"), use_container_width=True)
-        with c_bot3:
-            device_data = df['device_family'].value_counts().head(5).reset_index()
-            st.plotly_chart(px.pie(device_data, names='device_family', values='count', title="Top Device", template="plotly_dark"), use_container_width=True)
+        st.subheader("Top Errors (4xx/5xx)")
+        errors = df[df['status_code'] >= 400]['request_path'].value_counts().head(15).reset_index()
+        st.table(errors)
 
     with tabs[4]:
-        st.subheader("🔎 IP Investigation")
-        ip_query = st.text_input("IP Address...").strip()
-        if ip_query:
-            ip_res = df_full[df_full['client_addr'] == ip_query]
-            if not ip_res.empty:
-                i_c1, i_c2, i_c3 = st.columns(3)
-                i_c1.metric("Total Hits", len(ip_res))
-                i_c2.metric("Success Rate", f"{(ip_res['status_code'] < 400).mean()*100:.1f}%")
-                i_c3.metric("Last Seen", ip_res['start_local'].max().strftime('%Y-%m-%d %H:%M'))
-                st.write("**Top Domains**")
-                st.bar_chart(ip_res['request_host'].value_counts().head(10))
-                st.write("**Recent Requests**")
-                st.dataframe(ip_res[['start_local', 'request_method', 'request_host', 'request_path', 'status_code']].head(50), use_container_width=True)
-            else: st.warning("IP not found in logs.")
+        st.subheader("Bot Breakdown")
+        bot_fam = df[df['is_bot'] == True]['browser_family'].value_counts().reset_index()
+        st.plotly_chart(px.bar(bot_fam, x='count', y='browser_family', orientation='h', template="plotly_dark"), use_container_width=True)
+
+    with tabs[5]:
+        st.subheader("IP Investigator")
+        ip_in = st.text_input("IP Address...").strip()
+        if ip_in:
+            res = df_full[df_full['client_addr'] == ip_in]
+            if not res.empty:
+                st.write(f"**Results for {ip_in} ({res.iloc[0]['country_code']} - {res.iloc[0]['asn']})**")
+                st.dataframe(res[['start_local', 'request_method', 'request_host', 'request_path', 'status_code']].head(50), use_container_width=True)
+            else: st.warning("No data found.")
+
+    with tabs[6]:
+        st.subheader("Live View (Last 50)")
+        st.dataframe(df_full[['start_local', 'client_addr', 'country_code', 'request_method', 'request_host', 'request_path', 'status_code']].head(50), use_container_width=True)
+        if st.button("Manual Refresh"): st.rerun()
 
     st.sidebar.markdown("---")
     st.sidebar.caption(f"Sync: {datetime.now().strftime('%H:%M:%S')}")
-    if st.sidebar.button("🔄 Refresh"): st.rerun()
+    if st.sidebar.button("🔄 Refresh Data"): st.rerun()
