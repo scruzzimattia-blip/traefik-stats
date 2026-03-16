@@ -186,7 +186,7 @@ else:
                     target_layer = layers[i+1]
                     
                     # Group by layers and include status_group for coloring if it's the last hop
-                    group_cols = [source_layer, target_layer, 'status_group']
+                    group_cols = list(dict.fromkeys([source_layer, target_layer, 'status_group']))
                     grouped = s_df.groupby(group_cols).size().reset_index(name='val')
                     
                     for _, row in grouped.iterrows():
