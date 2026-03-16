@@ -2,3 +2,4 @@ postgres_data/
 __pycache__/
 *.log
 .git/
+npm-stats/
