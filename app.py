@@ -2,92 +2,117 @@ import streamlit as st
 import pandas as pd
 import json
 import plotly.express as px
-from datetime import datetime
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, UniqueConstraint, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
+import time
 
-st.set_page_config(page_title="Traefik Stats", layout="wide")
+st.set_page_config(page_title="Traefik Stats (DB)", layout="wide")
 
-st.title("📊 Traefik Access Log Dashboard")
+st.title("📊 Traefik Stats - PostgreSQL")
 
+# Database Configuration
+DB_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/traefik_stats")
 LOG_FILE = "/app/logs/access.log"
 
-@st.cache_data(ttl=10)
-def load_data():
-    data = []
+# SQLAlchemy setup
+Base = declarative_base()
+class AccessLog(Base):
+    __tablename__ = 'access_logs'
+    id = Column(Integer, primary_key=True)
+    start_local = Column(DateTime)
+    client_addr = Column(String)
+    request_method = Column(String)
+    request_path = Column(String)
+    request_host = Column(String)
+    entry_point = Column(String)
+    status_code = Column(Integer)
+    duration = Column(Integer)
+    __table_args__ = (UniqueConstraint('start_local', 'client_addr', 'request_path', name='_req_uc'),)
+
+engine = create_engine(DB_URL)
+Session = sessionmaker(bind=engine)
+Base.metadata.create_all(engine)
+
+def load_logs_to_db():
+    if not os.path.exists(LOG_FILE):
+        return 0
+    
+    session = Session()
+    new_records = 0
     try:
         with open(LOG_FILE, 'r') as f:
             for line in f:
                 try:
-                    data.append(json.loads(line))
-                except json.JSONDecodeError:
+                    data = json.loads(line)
+                    # Simple duplicate check before inserting
+                    # Traefik logs usually have StartLocal
+                    log_entry = AccessLog(
+                        start_local=pd.to_datetime(data.get('StartLocal')),
+                        client_addr=data.get('ClientAddr'),
+                        request_method=data.get('RequestMethod'),
+                        request_path=data.get('RequestPath'),
+                        request_host=data.get('RequestHost'),
+                        entry_point=data.get('EntryPointName'),
+                        status_code=int(data.get('DownstreamStatus', 0)),
+                        duration=int(data.get('Duration', 0))
+                    )
+                    session.add(log_entry)
+                    session.commit()
+                    new_records += 1
+                except Exception:
+                    session.rollback()
                     continue
-    except FileNotFoundError:
-        return pd.DataFrame()
-    
-    if not data:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(data)
-    # Convert StartLocal to datetime
-    if 'StartLocal' in df.columns:
-        df['StartLocal'] = pd.to_datetime(df['StartLocal'])
-    return df
+    finally:
+        session.close()
+    return new_records
 
-df = load_data()
+# Sidebar: Actions & Info
+if st.sidebar.button("🔄 Import New Logs"):
+    n = load_logs_to_db()
+    st.sidebar.success(f"Imported {n} new records.")
+
+# Query data from Postgres
+query = "SELECT * FROM access_logs ORDER BY start_local DESC"
+df = pd.read_sql(query, engine)
 
 if df.empty:
-    st.warning("No data found in access.log yet. Please wait for Traefik to log some requests.")
-    if st.button("Refresh"):
-        st.rerun()
+    st.warning("No data in database. Try 'Import New Logs' or check access.log.")
 else:
     # Sidebar filters
     st.sidebar.header("Filters")
-    if 'EntryPointName' in df.columns:
-        entry_point = st.sidebar.multiselect("Entry Point", options=df['EntryPointName'].unique(), default=df['EntryPointName'].unique())
-        df = df[df['EntryPointName'].isin(entry_point)]
+    entry_point = st.sidebar.multiselect("Entry Point", options=df['entry_point'].unique(), default=df['entry_point'].unique())
+    methods = st.sidebar.multiselect("Method", options=df['request_method'].unique(), default=df['request_method'].unique())
     
-    if 'RequestMethod' in df.columns:
-        methods = st.sidebar.multiselect("Request Method", options=df['RequestMethod'].unique(), default=df['RequestMethod'].unique())
-        df = df[df['RequestMethod'].isin(methods)]
+    filtered_df = df[df['entry_point'].isin(entry_point) & df['request_method'].isin(methods)]
 
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Requests", len(df))
-    if 'DownstreamStatus' in df.columns:
-        success_rate = (df['DownstreamStatus'].astype(int) < 400).mean() * 100
-        col2.metric("Success Rate", f"{success_rate:.1f}%")
-        col3.metric("Errors (4xx/5xx)", len(df[df['DownstreamStatus'].astype(int) >= 400]))
-    if 'Duration' in df.columns:
-        avg_duration = df['Duration'].mean() / 1_000_000 # Convert to ms if it's in ns
-        col4.metric("Avg Duration", f"{avg_duration:.2f}ms")
+    col1.metric("Total Requests", len(filtered_df))
+    success_rate = (filtered_df['status_code'] < 400).mean() * 100
+    col2.metric("Success Rate", f"{success_rate:.1f}%")
+    col3.metric("Errors (4xx/5xx)", len(filtered_df[filtered_df['status_code'] >= 400]))
+    avg_duration = filtered_df['duration'].mean() / 1_000_000
+    col4.metric("Avg Duration", f"{avg_duration:.2f}ms")
 
-    # Charts
+    # Timeline Chart
     st.subheader("Requests over Time")
-    if 'StartLocal' in df.columns:
-        df_time = df.set_index('StartLocal').resample('1min').size().reset_index(name='count')
-        fig_time = px.line(df_time, x='StartLocal', y='count', title="Requests per Minute")
-        st.plotly_chart(fig_time, use_container_width=True)
+    df_time = filtered_df.set_index('start_local').resample('1min').size().reset_index(name='count')
+    fig_time = px.line(df_time, x='start_local', y='count')
+    st.plotly_chart(fig_time, use_container_width=True)
 
     c1, c2 = st.columns(2)
-    
     with c1:
         st.subheader("Status Codes")
-        if 'DownstreamStatus' in df.columns:
-            fig_status = px.pie(df, names='DownstreamStatus', title="Response Status Distribution")
-            st.plotly_chart(fig_status, use_container_width=True)
-
+        fig_status = px.pie(filtered_df, names='status_code')
+        st.plotly_chart(fig_status, use_container_width=True)
     with c2:
-        st.subheader("Top Paths")
-        if 'RequestPath' in df.columns:
-            top_paths = df['RequestPath'].value_counts().head(10).reset_index()
-            top_paths.columns = ['Path', 'Count']
-            fig_paths = px.bar(top_paths, x='Count', y='Path', orientation='h', title="Top 10 Requested Paths")
-            st.plotly_chart(fig_paths, use_container_width=True)
+        st.subheader("Top Hosts")
+        top_hosts = filtered_df['request_host'].value_counts().head(10).reset_index()
+        top_hosts.columns = ['Host', 'Count']
+        fig_hosts = px.bar(top_hosts, x='Count', y='Host', orientation='h')
+        st.plotly_chart(fig_hosts, use_container_width=True)
 
-    st.subheader("Top Clients (IP)")
-    if 'ClientAddr' in df.columns:
-        top_ips = df['ClientAddr'].value_counts().head(10).reset_index()
-        top_ips.columns = ['IP', 'Count']
-        st.table(top_ips)
-
-    if st.button("Refresh Data"):
-        st.rerun()
+    st.subheader("Latest Requests")
+    st.dataframe(filtered_df.head(20))

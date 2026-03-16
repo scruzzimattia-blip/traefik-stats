@@ -1,8 +1,25 @@
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: traefik-stats-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: traefik_stats
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - proxy
+
   traefik-stats:
     build: .
     container_name: traefik-stats
     restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
     volumes:
       - /home/mattia/proxy/traefik/access.log:/app/logs/access.log:ro
     networks:
