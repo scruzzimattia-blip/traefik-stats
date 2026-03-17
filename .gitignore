@@ -4,3 +4,5 @@ __pycache__/
 .env
 crowdsec_data/
 crowdsec_config/
+venv/
+.pytest_cache/
