@@ -4,3 +4,4 @@ watchdog
 user-agents
 maxminddb
 requests
+pydantic

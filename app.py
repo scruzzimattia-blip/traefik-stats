@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from models import engine, AccessLog
+from models import engine, AccessLog, SessionLocal
 from crowdsec import CrowdSecManager
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime, timedelta
-from data_service import fetch_data
+from data_service import fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Traefik God Mode Monitor", layout="wide", page_icon="⚡")
@@ -236,10 +236,22 @@ else:
             
             with sec_col2:
                 st.subheader("📋 Security Log")
-                atk_only = df[df['is_attack'] == True]
-                if not atk_only.empty:
-                    st.warning(f"Found {len(atk_only)} security events")
-                    st.dataframe(atk_only[['start_local', 'client_addr', 'country_code', 'request_path', 'request_user_agent', 'asn']].head(15), use_container_width=True)
+                
+                total_attacks = get_total_logs_count(filter_attack=True)
+                page_size = 15
+                total_pages = (total_attacks // page_size) + (1 if total_attacks % page_size > 0 else 0)
+                
+                if total_attacks > 0:
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        page_num = st.number_input("Page", min_value=1, max_value=max(1, total_pages), value=1)
+                    with c2:
+                        st.write(f"Showing page {page_num} of {total_pages} ({total_attacks} total attacks)")
+                    
+                    offset = (page_num - 1) * page_size
+                    atk_page_df = fetch_logs_paginated(limit=page_size, offset=offset, filter_attack=True)
+                    
+                    st.dataframe(atk_page_df[['start_local', 'client_addr', 'country_code', 'request_path', 'request_user_agent', 'asn']], use_container_width=True)
                 else:
                     st.success("No malicious activity detected")
                 
@@ -475,9 +487,64 @@ else:
                                 else:
                                     st.error("Failed to block IP. Check CROWDSEC_LAPI_KEY.")
     
+                    # AbuseIPDB Integration
+                    abuse_data = get_abuse_reputation(ip_in)
+                    if abuse_data:
+                        st.markdown("---")
+                        st.subheader("🕵️ AbuseIPDB Intelligence")
+                        a_col1, a_col2, a_col3 = st.columns(3)
+                        with a_col1:
+                            score = abuse_data.get('abuseConfidenceScore', 0)
+                            color = "red" if score > 50 else "orange" if score > 20 else "green"
+                            st.markdown(f"**Abuse Confidence Score:** <span style='color:{color};font-size:24px;'>{score}%</span>", unsafe_allow_html=True)
+                        with a_col2:
+                            st.write(f"**Total Reports:** {abuse_data.get('totalReports', 0)}")
+                            st.write(f"**Last Reported:** {abuse_data.get('lastReportedAt', 'Never')}")
+                        with a_col3:
+                            st.write(f"**Domain:** {abuse_data.get('domain', 'N/A')}")
+                            st.write(f"**Usage Type:** {abuse_data.get('usageType', 'N/A')}")
+                        
+                        with st.expander("Show Abuse Reports", expanded=False):
+                            reports = abuse_data.get('reports', [])
+                            if reports:
+                                for r in reports[:5]:
+                                    st.caption(f"📅 {r.get('reportedAt')} | 👤 {r.get('reporterId')}")
+                                    st.write(f"> {r.get('comment')}")
+                            else:
+                                st.info("No detailed reports found.")
+                    elif os.getenv("ABUSEIPDB_API_KEY"):
+                        st.info("No reputation data found for this IP on AbuseIPDB.")
+                    else:
+                        st.info("💡 Pro-Tip: Add `ABUSEIPDB_API_KEY` to your ENV to see live fraud scores here!")
+
                     st.markdown(f"[Search on AbuseIPDB](https://www.abuseipdb.com/check/{ip_in}) | [Whois Lookup](https://who.is/whois-ip/ip-address/{ip_in})")
-                    st.write("**Historical Requests**")
-                    st.dataframe(res[['start_local', 'request_method', 'request_host', 'request_path', 'status_code', 'is_attack']].head(100), use_container_width=True)
+                    st.write("**Historical Requests (Paginated)**")
+                    
+                    # We need a total count for this specific IP
+                    session = SessionLocal()
+                    total_ip_logs = session.query(func.count(AccessLog.id)).filter(AccessLog.client_addr == ip_in).scalar()
+                    session.close()
+                    
+                    inv_page_size = 20
+                    inv_total_pages = (total_ip_logs // inv_page_size) + (1 if total_ip_logs % inv_page_size > 0 else 0)
+                    
+                    if total_ip_logs > 0:
+                        ic1, ic2 = st.columns([1, 4])
+                        with ic1:
+                            inv_page = st.number_input("Page ", min_value=1, max_value=max(1, inv_total_pages), value=1, key="investigator_page")
+                        with ic2:
+                            st.write(f"Showing page {inv_page} of {inv_total_pages} ({total_ip_logs} total logs for this IP)")
+                            
+                        # Targeted fetch for this IP
+                        session = SessionLocal()
+                        inv_query = select(AccessLog).filter(AccessLog.client_addr == ip_in).order_by(AccessLog.start_local.desc()).limit(inv_page_size).offset((inv_page-1)*inv_page_size)
+                        hist_df = pd.read_sql(inv_query, engine)
+                        session.close()
+                        
+                        if not hist_df.empty:
+                            st.dataframe(hist_df[['start_local', 'request_method', 'request_host', 'request_path', 'status_code', 'is_attack']], use_container_width=True)
+                    else:
+                        st.info("No logs found for this IP.")
                 else: st.warning("IP not found.")
     
     with tabs[10]:

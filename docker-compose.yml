@@ -27,6 +27,7 @@ services:
       CROWDSEC_LAPI_URL: http://traefik-stats-crowdsec:8080
       CROWDSEC_LAPI_KEY: ${CROWDSEC_LAPI_KEY}
       CROWDSEC_MACHINE_PASSWORD: ${CROWDSEC_MACHINE_PASSWORD}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
     volumes:
       - /home/mattia/proxy/traefik/access.log:/app/logs/access.log:ro
       - /home/mattia/proxy/data/crowdsec/data/GeoLite2-City.mmdb:/app/geoip/city.mmdb:ro
@@ -47,6 +48,7 @@ services:
       CROWDSEC_LAPI_URL: http://traefik-stats-crowdsec:8080
       CROWDSEC_LAPI_KEY: ${CROWDSEC_LAPI_KEY}
       CROWDSEC_MACHINE_PASSWORD: ${CROWDSEC_MACHINE_PASSWORD}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
     volumes:
       - /home/mattia/proxy/data/crowdsec/data/GeoLite2-City.mmdb:/app/geoip/city.mmdb:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

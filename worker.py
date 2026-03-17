@@ -14,6 +14,9 @@ from sqlalchemy import func
 import re
 import requests
 import ipaddress
+import concurrent.futures
+from typing import Any
+from pydantic import BaseModel, ConfigDict
 
 LOG_FILE = "/app/logs/access.log"
 CITY_DB = "/app/geoip/city.mmdb"
@@ -22,6 +25,31 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Executor for async background tasks
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+
+def try_int(val: Any) -> int:
+    try:
+        if val is None or val == '': return 0
+        return int(val)
+    except:
+        return 0
+
+class TraefikLogData(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    StartLocal: str = ""
+    ClientAddr: str = ""
+    RequestUserAgent: str = ""
+    RequestPath: str = ""
+    RequestHost: str = ""
+    RequestMethod: str = ""
+    RequestProtocol: str = ""
+    RequestReferer: str = ""
+    EntryPointName: str = ""
+    DownstreamStatus: Any = 0
+    Duration: Any = 0
+    DownstreamContentSize: Any = 0
 
 ATTACK_PATTERNS = [
     r"\.\./", r"etc/passwd", r"wp-login", r"sql", r"phpinfo", r"eval\(", 
@@ -155,8 +183,13 @@ class LogHandler(FileSystemEventHandler):
                 f.seek(self.last_pos)
                 for line in f:
                     try:
-                        data = json.loads(line)
-                        raw_time = data.get('StartLocal', '')
+                        raw_data = json.loads(line)
+                        log_data = TraefikLogData(**raw_data)
+                        
+                        raw_time = log_data.StartLocal
+                        if not raw_time:
+                            continue
+                            
                         if raw_time.endswith('Z'):
                             raw_time = raw_time[:-1] + '+00:00'
                         
@@ -168,21 +201,21 @@ class LogHandler(FileSystemEventHandler):
                         if latest_db_entry and log_time.replace(tzinfo=None) <= latest_db_entry.replace(tzinfo=None):
                             continue
                         
-                        ip = self.clean_ip(data.get('ClientAddr', ''))
+                        ip = self.clean_ip(log_data.ClientAddr)
                         
                         # Skip monitoring for ignored IPs
                         if should_ignore_ip(ip):
                             continue
 
                         geo_info = self.geo.resolve(ip)
-                        ua = parse(data.get('RequestUserAgent', ''))
-                        path = data.get('RequestPath', '')
-                        host = data.get('RequestHost', '')
+                        ua = parse(log_data.RequestUserAgent)
+                        path = log_data.RequestPath
+                        host = log_data.RequestHost
                         
                         attack = self.is_attack(path)
                         reason = f"Attack pattern: {path}" if attack else None
                         
-                        status_code = int(data.get('DownstreamStatus', 0)) if data.get('DownstreamStatus') else 0
+                        status_code = try_int(log_data.DownstreamStatus)
                         
                         # Soft-Ban Check
                         if not attack and status_code >= 400:
@@ -191,9 +224,9 @@ class LogHandler(FileSystemEventHandler):
                                 reason = "Rate Limit Exceeded (High Error Rate)"
                         
                         if attack and self.crowdsec and ip not in self.blocked_ips_cache:
-                            # Automatic block in CrowdSec
-                            self.crowdsec.block_ip(ip, reason=reason)
-                            self.notify_discord(ip, reason, path, geo_info["country_code"])
+                            # Automatic block in CrowdSec (Async)
+                            executor.submit(self.crowdsec.block_ip, ip, "24h", reason)
+                            executor.submit(self.notify_discord, ip, reason, path, geo_info["country_code"])
                             self.blocked_ips_cache.add(ip)
                         
                         log_entry = AccessLog(
@@ -203,21 +236,21 @@ class LogHandler(FileSystemEventHandler):
                             country_name=geo_info["country_name"],
                             city_name=geo_info["city"],
                             asn=geo_info["asn"],
-                            request_method=data.get('RequestMethod'),
+                            request_method=log_data.RequestMethod,
                             request_path=path,
-                            request_host=data.get('RequestHost'),
-                            request_protocol=data.get('RequestProtocol'),
-                            request_referer=data.get('RequestReferer'),
-                            request_user_agent=data.get('RequestUserAgent'),
+                            request_host=host,
+                            request_protocol=log_data.RequestProtocol,
+                            request_referer=log_data.RequestReferer,
+                            request_user_agent=log_data.RequestUserAgent,
                             is_bot=ua.is_bot,
                             is_attack=attack,
                             browser_family=ua.browser.family,
                             os_family=ua.os.family,
                             device_family=ua.device.family,
-                            entry_point=data.get('EntryPointName'),
-                            status_code=int(data.get('DownstreamStatus', 0)) if data.get('DownstreamStatus') else 0,
-                            duration=int(data.get('Duration', 0)) if data.get('Duration') else 0,
-                            content_size=int(data.get('DownstreamContentSize', 0)) if data.get('DownstreamContentSize') else 0
+                            entry_point=log_data.EntryPointName,
+                            status_code=status_code,
+                            duration=try_int(log_data.Duration),
+                            content_size=try_int(log_data.DownstreamContentSize)
                         )
                         session.add(log_entry)
                         new_count += 1
@@ -268,7 +301,7 @@ def notify_critical_error(err_msg):
                 "timestamp": datetime.now().isoformat()
             }]
         }
-        requests.post(DISCORD_WEBHOOK, json=payload, timeout=5)
+        executor.submit(requests.post, DISCORD_WEBHOOK, json=payload, timeout=5)
     except Exception: pass
 
 if __name__ == "__main__":
