@@ -131,14 +131,18 @@ class CrowdSecManager:
             pass
         return None
 
-    def get_all_decisions(self) -> List[dict]:
+    def get_all_decisions(self, origin: Optional[str] = None) -> List[dict]:
         """List all current decisions (bans)."""
         if not self.api_key:
             return []
 
         url = f"{self.api_url}/v1/decisions"
+        params = {}
+        if origin:
+            params["origin"] = origin
+            
         try:
-            response = requests.get(url, headers=self.bouncer_headers, timeout=5)
+            response = requests.get(url, headers=self.bouncer_headers, params=params, timeout=5)
             if response.status_code == 200:
                 return response.json() or []
         except:

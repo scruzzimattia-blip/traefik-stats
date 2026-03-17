@@ -643,10 +643,20 @@ else:
                                 st.success(f"IP {block_ip} banned.")
                                 st.rerun()
                             else: st.error("LAPI Error.")
+                
+                st.markdown("---")
+                show_capi = st.checkbox("Show Community Blocklist (CAPI)", value=False, help="Show all 15,000+ community-sourced blocks from CrowdSec Central API.")
             
             with c_cs2:
                 st.markdown("#### 📜 Active Decisions")
-                decisions = cs.get_all_decisions()
+                if show_capi:
+                    decisions = cs.get_all_decisions()
+                else:
+                    # Fetch local decisions by excluding CAPI (we do this by fetching and filtering in Python, or using multiple origins if LAPI allowed it)
+                    # For simplicity, we fetch all and filter if not show_capi
+                    all_decisions = cs.get_all_decisions()
+                    decisions = [d for d in all_decisions if d.get('origin') != 'CAPI']
+                
                 if decisions:
                     d_df = pd.DataFrame(decisions)
                     # Safely select columns that exist, filling missing with None
