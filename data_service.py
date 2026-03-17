@@ -195,14 +195,24 @@ def get_bandwidth_spikes(hours=24):
 
 def get_threat_leaders(limit=20):
     try:
+        from crowdsec import CrowdSecManager
+        cs = CrowdSecManager()
+        blocked_ips = {d.get('value') for d in cs.get_all_decisions() if d.get('value')}
+        
         query = select(
             AccessLog.client_addr,
             func.sum(AccessLog.threat_score).label('total_threat'),
             func.count(AccessLog.id).label('requests'),
             AccessLog.country_code,
             AccessLog.asn
-        ).group_by(AccessLog.client_addr, AccessLog.country_code, AccessLog.asn).order_by(func.sum(AccessLog.threat_score).desc()).limit(limit)
-        return pd.read_sql(query, engine)
+        ).group_by(AccessLog.client_addr, AccessLog.country_code, AccessLog.asn).order_by(func.sum(AccessLog.threat_score).desc())
+        
+        df = pd.read_sql(query, engine)
+        
+        if blocked_ips:
+            df = df[~df['client_addr'].isin(blocked_ips)]
+        
+        return df.head(limit)
     except Exception as e:
         logger.error(f"Threat leaders error: {e}")
         return pd.DataFrame()
