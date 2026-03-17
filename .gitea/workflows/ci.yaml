@@ -36,6 +36,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get version
+        id: version
+        run: |
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION)
+          else
+            VERSION="1.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
       - name: Login to Gitea Registry
         run: |
           echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login 192.168.1.41:3000 --username "${{ github.actor }}" --password-stdin
@@ -44,22 +55,42 @@ jobs:
         run: |
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           REPO_NAME=$(echo "traefik-stats" | tr '[:upper:]' '[:lower:]')
+          VERSION="${{ steps.version.outputs.version }}"
           
           IMAGE_TAG_LATEST="192.168.1.41:3000/${REPO_OWNER}/${REPO_NAME}/traefik-stats-worker:latest"
+          IMAGE_TAG_VERSION="192.168.1.41:3000/${REPO_OWNER}/${REPO_NAME}/traefik-stats-worker:${VERSION}"
           IMAGE_TAG_SHA="192.168.1.41:3000/${REPO_OWNER}/${REPO_NAME}/traefik-stats-worker:${{ github.sha }}"
           
-          docker build -f Dockerfile.worker -t ${IMAGE_TAG_LATEST} -t ${IMAGE_TAG_SHA} .
+          docker build -f Dockerfile.worker -t ${IMAGE_TAG_LATEST} -t ${IMAGE_TAG_VERSION} -t ${IMAGE_TAG_SHA} .
           docker push ${IMAGE_TAG_LATEST}
+          docker push ${IMAGE_TAG_VERSION}
           docker push ${IMAGE_TAG_SHA}
 
       - name: Build and push app image
         run: |
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           REPO_NAME=$(echo "traefik-stats" | tr '[:upper:]' '[:lower:]')
+          VERSION="${{ steps.version.outputs.version }}"
           
           IMAGE_TAG_LATEST="192.168.1.41:3000/${REPO_OWNER}/${REPO_NAME}/traefik-stats-app:latest"
+          IMAGE_TAG_VERSION="192.168.1.41:3000/${REPO_OWNER}/${REPO_NAME}/traefik-stats-app:${VERSION}"
           IMAGE_TAG_SHA="192.168.1.41:3000/${REPO_OWNER}/${REPO_NAME}/traefik-stats-app:${{ github.sha }}"
           
-          docker build -t ${IMAGE_TAG_LATEST} -t ${IMAGE_TAG_SHA} .
+          docker build -t ${IMAGE_TAG_LATEST} -t ${IMAGE_TAG_VERSION} -t ${IMAGE_TAG_SHA} .
           docker push ${IMAGE_TAG_LATEST}
+          docker push ${IMAGE_TAG_VERSION}
           docker push ${IMAGE_TAG_SHA}
+
+      - name: Increment version
+        if: success()
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo $NEW_VERSION > VERSION
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add VERSION
+          git commit -m "Bump version to ${NEW_VERSION}" || echo "No changes to commit"
