@@ -6,3 +6,4 @@ maxminddb
 requests
 pydantic
 pandas
+redis

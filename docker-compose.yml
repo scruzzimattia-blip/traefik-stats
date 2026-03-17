@@ -12,6 +12,13 @@ services:
     networks:
       - proxy
 
+  redis:
+    image: redis:7-alpine
+    container_name: traefik-stats-redis
+    restart: unless-stopped
+    networks:
+      - proxy
+
   worker:
     build: 
       context: .
@@ -20,6 +27,7 @@ services:
     restart: unless-stopped
     depends_on:
       - db
+      - redis
     entrypoint: ["python", "worker.py"]
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
@@ -28,6 +36,11 @@ services:
       CROWDSEC_LAPI_KEY: ${CROWDSEC_LAPI_KEY}
       CROWDSEC_MACHINE_PASSWORD: ${CROWDSEC_MACHINE_PASSWORD}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
+      LOG_FILE: /app/logs/access.log
+      CITY_DB: /app/geoip/city.mmdb
+      ASN_DB: /app/geoip/asn.mmdb
+      ATTACK_PATTERNS: ${ATTACK_PATTERNS:-}
     volumes:
       - /home/mattia/proxy/traefik/access.log:/app/logs/access.log:ro
       - /home/mattia/proxy/data/crowdsec/data/GeoLite2-City.mmdb:/app/geoip/city.mmdb:ro
@@ -63,7 +76,6 @@ services:
     restart: unless-stopped
     environment:
       COLLECTIONS: "crowdsecurity/traefik crowdsecurity/http-cve"
-      # We'll use the worker's detection mostly, but CrowdSec can also watch the logs
     volumes:
       - /home/mattia/proxy/traefik/access.log:/var/log/traefik/access.log:ro
       - ./crowdsec_data:/var/lib/crowdsec/data

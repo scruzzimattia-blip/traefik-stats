@@ -7,7 +7,12 @@ from models import engine, AccessLog, SessionLocal
 from crowdsec import CrowdSecManager
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
-from data_service import fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated, format_bytes
+from data_service import (
+    fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated, format_bytes,
+    get_login_attempts, get_top_slowest_endpoints, get_error_trends, get_bandwidth_spikes,
+    get_threat_leaders, get_blocked_countries, add_blocked_country, remove_blocked_country,
+    get_worker_stats, update_precomputed_stats
+)
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Traefik God Mode Monitor", layout="wide", page_icon="⚡")
@@ -294,6 +299,11 @@ else:
                 path_stats = df.groupby('request_path').agg({'id': 'count', 'duration_ms': 'mean', 'status_code': lambda x: (x >= 400).mean() * 100}).rename(columns={'id': 'Hits', 'duration_ms': 'Avg Latency', 'status_code': 'Error %'}).sort_values('Hits', ascending=False).head(15)
                 st.dataframe(path_stats.style.format({'Avg Latency': '{:.2f} ms', 'Error %': '{:.1f}%'}), use_container_width=True)
                 
+                st.subheader("🐌 Slowest Endpoints")
+                slow_df = get_top_slowest_endpoints(10)
+                if not slow_df.empty:
+                    st.table(slow_df.rename(columns={'request_path': 'Path', 'avg_ms': 'Avg ms', 'hits': 'Hits'}))
+                
                 st.subheader("🌐 Top Referers")
                 st.table(df['request_referer'].value_counts().head(10))
             
@@ -306,6 +316,11 @@ else:
                 
                 bw_timeline = df.set_index('start_local').groupby(pd.Grouper(freq='5min'))['content_size'].sum().reset_index()
                 st.plotly_chart(px.area(bw_timeline, x='start_local', y='content_size', template="plotly_dark", title="Throughput over Time"), use_container_width=True)
+                
+                st.subheader("📊 Error Trends (24h)")
+                error_trends = get_error_trends(24)
+                if not error_trends.empty:
+                    st.plotly_chart(px.line(error_trends, x='hour', y='count', color='status_code', template="plotly_dark"), use_container_width=True)
                 
                 st.subheader("🤖 Browsers & Devices")
                 col_b1, col_b2 = st.columns(2)
@@ -418,8 +433,61 @@ else:
                     st.table(err_df['request_path'].value_counts().head(10))
                 else:
                     st.success("No errors")
+                
+                st.write("**🚨 Threat Leaders (Highest Risk IPs)**")
+                threat_df = get_threat_leaders(10)
+                if not threat_df.empty:
+                    st.dataframe(threat_df.rename(columns={
+                        'client_addr': 'IP', 'total_threat': 'Threat Score', 
+                        'requests': 'Reqs', 'country_code': 'Country', 'asn': 'ASN'
+                    }), use_container_width=True)
+                
+                st.write("**🔐 Login Attempts (24h)**")
+                login_attempts = get_login_attempts(24, 20)
+                if login_attempts:
+                    login_data = [{"IP": la.ip_address, "Path": la.path, "Status": la.status_code, "Time": la.timestamp.strftime("%H:%M"), "Country": la.country_code} for la in login_attempts]
+                    st.table(pd.DataFrame(login_data))
+                else:
+                    st.success("No suspicious login attempts")
             
             with col_h2:
+                st.write("**🌍 Geo Blocking**")
+                blocked_countries = get_blocked_countries()
+                if blocked_countries:
+                    st.write("Blocked:", ", ".join([c.country_code for c in blocked_countries if c.active]))
+                else:
+                    st.info("No countries blocked")
+                
+                with st.form("block_country"):
+                    country_code = st.text_input("Country Code (e.g., CN, RU)", max_chars=2).upper()
+                    reason = st.text_input("Reason")
+                    if st.form_submit_button("🚫 Block Country"):
+                        if country_code and add_blocked_country(country_code, reason):
+                            st.success(f"Blocked {country_code}")
+                            st.rerun()
+                
+                with st.form("unblock_country"):
+                    if blocked_countries:
+                        unblock_country = st.selectbox("Unblock", [c.country_code for c in blocked_countries if c.active])
+                        if st.form_submit_button("✅ Unblock"):
+                            if remove_blocked_country(unblock_country):
+                                st.success(f"Unblocked {unblock_country}")
+                                st.rerun()
+                
+                st.write("**⚙️ Worker Stats (24h)**")
+                worker_stats = get_worker_stats(24)
+                if worker_stats:
+                    total_logs = sum(s['logs_processed'] for s in worker_stats)
+                    total_attacks = sum(s['attacks_detected'] for s in worker_stats)
+                    total_banned = sum(s['ips_banned'] for s in worker_stats)
+                    total_errors = sum(s['db_errors'] for s in worker_stats)
+                    st.metric("Logs Processed", f"{total_logs:,}")
+                    st.metric("Attacks Detected", f"{total_attacks:,}")
+                    st.metric("IPs Banned", f"{total_banned:,}")
+                    st.metric("DB Errors", f"{total_errors:,}")
+                else:
+                    st.info("No worker stats available")
+                
                 st.write("**Maintenance**")
                 if st.button("🧹 Prune (Keep 30 days)"):
                     try:
@@ -433,6 +501,10 @@ else:
                 if st.button("🔄 Clear Cache"):
                     st.cache_data.clear()
                     st.success("Cache cleared")
+                
+                if st.button("📊 Update Precomputed Stats"):
+                    update_precomputed_stats()
+                    st.success("Stats updated")
     
     st.sidebar.markdown("---")
     st.sidebar.caption(f"Last: {datetime.now().strftime('%H:%M:%S')}")
