@@ -6,6 +6,7 @@ from models import engine, AccessLog
 from crowdsec import CrowdSecManager
 from sqlalchemy import select
 from datetime import datetime, timedelta
+from data_service import fetch_data
 
 st.set_page_config(page_title="Traefik God Mode Monitor", layout="wide", page_icon="⚡")
 
@@ -21,20 +22,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("⚡ Traefik God Mode Monitor")
-
-@st.cache_data(ttl=5)
-def fetch_data(limit=50000):
-    try:
-        query = select(AccessLog).order_by(AccessLog.start_local.desc()).limit(limit)
-        df = pd.read_sql(query, engine)
-        if not df.empty:
-            df['start_local'] = pd.to_datetime(df['start_local'])
-            df['duration_ms'] = df['duration'] / 1_000_000
-            df['status_group'] = df['status_code'].apply(lambda x: f"{str(x)[0]}xx")
-        return df
-    except Exception as e: 
-        st.error(f"DB Error: {e}")
-        return pd.DataFrame()
 
 # Sidebar: Data Limit
 data_limit = st.sidebar.select_slider("Data Scan Depth", options=[1000, 10000, 50000, 100000], value=50000)

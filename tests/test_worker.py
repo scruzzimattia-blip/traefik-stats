@@ -43,12 +43,14 @@ def test_should_ignore_ip():
     # Test specific ignored IP
     assert should_ignore_ip("92.106.189.142") is True
     
-    # Test via env var
-    os.environ["IGNORED_IPS"] = "1.2.3.4,5.6.7.8"
+    # Test via mock of global set
+    import worker
+    worker.IGNORED_IPS_SET = {"1.2.3.4", "5.6.7.8"}
     assert should_ignore_ip("1.2.3.4") is True
     assert should_ignore_ip("5.6.7.8") is True
     assert should_ignore_ip("92.106.189.142") is False # Overridden by env
-    del os.environ["IGNORED_IPS"]
+    # Restore defaults
+    worker.IGNORED_IPS_SET = {"92.106.189.142"}
 
 def test_attack_detection(mock_geo):
     handler = LogHandler(mock_geo)

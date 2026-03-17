@@ -1,7 +1,6 @@
 import os
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, BigInteger, Boolean, UniqueConstraint, Index
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 DB_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/traefik_stats")
 
@@ -47,7 +46,12 @@ class AccessLog(Base):
         Index('idx_time_host', 'start_local', 'request_host'),
     )
 
-engine = create_engine(DB_URL)
+engine = create_engine(
+    DB_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():

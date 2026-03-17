@@ -23,68 +23,86 @@ class CrowdSecManager:
             "User-Agent": "traefik-god-mode",
         }
 
-    def block_ip(self, ip: str, duration: str = "24h", reason: str = "Traefik God Mode Detection"):
-        """Create a ban decision in CrowdSec."""
-        import subprocess
-        
-        # Use cscli command to add decision
-        cmd = [
-            "cscli", "decisions", "add",
-            "--ip", ip,
-            "--type", "ban",
-            "--duration", duration,
-            "--reason", reason
-        ]
-        
-        # Execute cscli command in CrowdSec container
-        full_cmd = ["docker", "exec", "traefik-stats-crowdsec"] + cmd
-        result = subprocess.run(
-            full_cmd,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        # Debug output
-        logger.debug(f"Block IP command: {' '.join(full_cmd)}")
-        logger.debug(f"Return code: {result.returncode}")
-        logger.debug(f"Stdout: {result.stdout}")
-        logger.debug(f"Stderr: {result.stderr}")
-        
-        # Check if successful - output goes to stderr, not stdout
-        success = result.returncode == 0 and "successfully" in (result.stdout + result.stderr).lower()
-        logger.debug(f"Success: {success}")
-        return success
+    def _get_token(self) -> Optional[str]:
+        """Holt ein JWT-Token von der CrowdSec LAPI."""
+        url = f"{self.api_url}/v1/watchers/login"
+        payload = {
+            "machine_id": self.machine_login,
+            "password": self.machine_password
+        }
+        try:
+            resp = requests.post(url, json=payload, timeout=5)
+            if resp.status_code == 200:
+                return resp.json().get("token")
+            logger.error(f"Token fetch failed: {resp.status_code} - {resp.text}")
+        except Exception as e:
+            logger.error(f"Failed to get CrowdSec token: {e}")
+        return None
 
-    def unblock_ip(self, ip: str):
-        """Remove all active decisions for a specific IP."""
-        import subprocess
+    def block_ip(self, ip: str, duration: str = "24h", reason: str = "Traefik God Mode Detection"):
+        """Create a ban decision in CrowdSec via LAPI."""
+        token = self._get_token()
+        if not token:
+            return False
+            
+        url = f"{self.api_url}/v1/alerts"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        
+        alerts = [{
+            "scenario": reason,
+            "message": reason,
+            "source": {
+                "scope": "Ip",
+                "value": ip
+            },
+            "events_count": 1,
+            "start_at": now,
+            "stop_at": now,
+            "decisions": [
+                {
+                    "duration": duration,
+                    "origin": "traefik-god-mode",
+                    "scenario": reason,
+                    "scope": "Ip",
+                    "type": "ban",
+                    "value": ip
+                }
+            ]
+        }]
         
         try:
-            # Use cscli command to delete decision
-            cmd = [
-                "cscli", "decisions", "delete",
-                "--ip", ip
-            ]
+            resp = requests.post(url, headers=headers, json=alerts, timeout=5)
+            success = resp.status_code in (200, 201)
+            if not success:
+                logger.error(f"CrowdSec block failed: {resp.status_code} - {resp.text}")
+            return success
+        except Exception as e:
+            logger.error(f"Error blocking IP {ip}: {e}")
+            return False
+
+    def unblock_ip(self, ip: str):
+        """Remove all active decisions for a specific IP via LAPI."""
+        token = self._get_token()
+        if not token:
+            return False
             
-            # Execute cscli command in CrowdSec container
-            full_cmd = ["docker", "exec", "traefik-stats-crowdsec"] + cmd
-            result = subprocess.run(
-                full_cmd,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            # Debug output
-            logger.debug(f"Unblock IP command: {' '.join(full_cmd)}")
-            logger.debug(f"Return code: {result.returncode}")
-            logger.debug(f"Stdout: {result.stdout}")
-            logger.debug(f"Stderr: {result.stderr}")
-            
-            # Check if successful
-            success = result.returncode == 0 and "deleted" in (result.stdout + result.stderr).lower()
-            logger.debug(f"Success: {success}")
+        url = f"{self.api_url}/v1/decisions"
+        params = {"ip": ip}
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+        
+        try:
+            resp = requests.delete(url, headers=headers, params=params, timeout=5)
+            success = resp.status_code in (200, 204)
+            if not success:
+                logger.error(f"CrowdSec unblock failed: {resp.status_code} - {resp.text}")
             return success
         except Exception as e:
             logger.error(f"Error unblocking IP {ip}: {e}")

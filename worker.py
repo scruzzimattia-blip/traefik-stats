@@ -30,11 +30,12 @@ ATTACK_PATTERNS = [
     r"perl\s", r"bash\s", r"sh\s", r"cgi-bin", r"admin/config", r"wp-config",
     r"\.git", r"\.svn", r"\.htaccess", r"id_rsa", r"id_dsa", r"shadow", r"htpasswd"
 ]
+ATTACK_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in ATTACK_PATTERNS]
+
+IGNORED_IPS_SET = set(os.getenv("IGNORED_IPS", "92.106.189.142").split(","))
 
 def should_ignore_ip(ip_str):
-    # Manual ignore list from environment or hardcoded
-    ignored = set(os.getenv("IGNORED_IPS", "92.106.189.142").split(","))
-    if ip_str in ignored:
+    if ip_str in IGNORED_IPS_SET:
         return True
     try:
         ip = ipaddress.ip_address(ip_str)
@@ -106,8 +107,8 @@ class LogHandler(FileSystemEventHandler):
 
     def is_attack(self, path):
         if not path: return False
-        for p in ATTACK_PATTERNS:
-            if re.search(p, path, re.IGNORECASE): return True
+        for p in ATTACK_PATTERNS_COMPILED:
+            if p.search(path): return True
         return False
 
     def process_new_lines(self):
@@ -118,14 +119,25 @@ class LogHandler(FileSystemEventHandler):
             
             if not os.path.exists(LOG_FILE):
                 return
+                
+            if os.path.getsize(LOG_FILE) < self.last_pos:
+                # Log rotation detected
+                self.last_pos = 0
 
             with open(LOG_FILE, 'r') as f:
                 f.seek(self.last_pos)
                 for line in f:
                     try:
                         data = json.loads(line)
-                        log_time = pd.to_datetime(data.get('StartLocal'))
+                        raw_time = data.get('StartLocal', '')
+                        if raw_time.endswith('Z'):
+                            raw_time = raw_time[:-1] + '+00:00'
                         
+                        try:
+                            log_time = datetime.fromisoformat(raw_time)
+                        except ValueError:
+                            log_time = pd.to_datetime(raw_time)
+                            
                         if latest_db_entry and log_time.replace(tzinfo=None) <= latest_db_entry.replace(tzinfo=None):
                             continue
                         
@@ -149,7 +161,7 @@ class LogHandler(FileSystemEventHandler):
                             self.notify_discord(ip, reason, path, geo_info["country_code"])
                             self.blocked_ips_cache.add(ip)
                         
-                        session.add(AccessLog(
+                        log_entry = AccessLog(
                             start_local=log_time,
                             client_addr=ip,
                             country_code=geo_info["country_code"],
@@ -168,17 +180,31 @@ class LogHandler(FileSystemEventHandler):
                             os_family=ua.os.family,
                             device_family=ua.device.family,
                             entry_point=data.get('EntryPointName'),
-                            status_code=int(data.get('DownstreamStatus', 0)),
-                            duration=int(data.get('Duration', 0)),
-                            content_size=int(data.get('DownstreamContentSize', 0))
-                        ))
+                            status_code=int(data.get('DownstreamStatus', 0)) if data.get('DownstreamStatus') else 0,
+                            duration=int(data.get('Duration', 0)) if data.get('Duration') else 0,
+                            content_size=int(data.get('DownstreamContentSize', 0)) if data.get('DownstreamContentSize') else 0
+                        )
+                        session.add(log_entry)
                         new_count += 1
+                        
                         if new_count % 100 == 0:
-                            session.commit()
-                    except Exception as e:
-                        session.rollback()
+                            try:
+                                session.commit()
+                            except Exception as e:
+                                session.rollback()
+                                logger.error(f"Batch commit error: {e}")
+                    except json.JSONDecodeError:
                         continue
-                session.commit()
+                    except Exception as e:
+                        logger.error(f"Error parsing log line: {e}")
+                        continue
+                        
+                try:
+                    session.commit()
+                except Exception as e:
+                    session.rollback()
+                    logger.error(f"Final batch commit error: {e}")
+                    
                 self.last_pos = f.tell()
                 if new_count > 0:
                     logger.info(f"Processed {new_count} new log lines.")
