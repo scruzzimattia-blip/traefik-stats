@@ -458,10 +458,9 @@ else:
                         st.markdown("#### 🛡️ CrowdSec Status")
                         if cs_status:
                             st.error(f"🚫 **Blocked:** {cs_status.get('type')} (Origin: {cs_status.get('origin')})")
-                            st.caption(f"Reason: {cs_status.get('reason')}")
+                            st.caption(f"Reason: {cs_status.get('scenario')}")
                             st.caption(f"Until: {cs_status.get('until')}")
-                            if st.button("🔓 Unblock IP"):
-                                if cs.unblock_ip(ip_in):
+                            if st.button("🔓 Unblock IP"):                                if cs.unblock_ip(ip_in):
                                     st.success(f"IP {ip_in} unblocked!")
                                     st.rerun()
                         else:
@@ -541,7 +540,8 @@ else:
                 if decisions:
                     d_df = pd.DataFrame(decisions)
                     # Safely select columns that exist, filling missing with None
-                    cols = ['value', 'type', 'origin', 'duration', 'reason', 'until']
+                    # Use 'scenario' as it's the actual field name from LAPI
+                    cols = ['value', 'type', 'origin', 'duration', 'scenario', 'until']
                     d_df = d_df.reindex(columns=cols)
                     st.dataframe(d_df, use_container_width=True)
                     
