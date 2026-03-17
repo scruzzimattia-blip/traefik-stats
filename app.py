@@ -540,7 +540,10 @@ else:
                 decisions = cs.get_all_decisions()
                 if decisions:
                     d_df = pd.DataFrame(decisions)
-                    st.dataframe(d_df[['value', 'type', 'origin', 'duration', 'reason', 'until']], use_container_width=True)
+                    # Safely select columns that exist, filling missing with None
+                    cols = ['value', 'type', 'origin', 'duration', 'reason', 'until']
+                    d_df = d_df.reindex(columns=cols)
+                    st.dataframe(d_df, use_container_width=True)
                     
                     unblock_val = st.selectbox("Select IP to Unblock", options=[d['value'] for d in decisions])
                     if st.button("🔓 Remove Decision"):
