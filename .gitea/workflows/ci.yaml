@@ -52,7 +52,7 @@ jobs:
           context: .
           file: ./Dockerfile.worker
           push: true
-          tags: git.scruzzi.com/traefik-stats-worker:${{ github.sha }},git.scruzzi.com/traefik-stats-worker:latest
+          tags: git.scruzzi.com/traefik-stats/traefik-stats-worker:${{ github.sha }},git.scruzzi.com/traefik-stats/traefik-stats-worker:latest
 
       - name: Build and push app image
         uses: docker/build-push-action@v5
@@ -60,4 +60,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: git.scruzzi.com/traefik-stats-app:${{ github.sha }},git.scruzzi.com/traefik-stats-app:latest
+          tags: git.scruzzi.com/traefik-stats/traefik-stats-app:${{ github.sha }},git.scruzzi.com/traefik-stats/traefik-stats-app:latest
