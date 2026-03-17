@@ -64,6 +64,12 @@ class CrowdSecManager:
             "events_count": 1,
             "start_at": now,
             "stop_at": now,
+            "capacity": 1,
+            "leakspeed": "0s",
+            "simulated": False,
+            "scenario_hash": "",
+            "scenario_version": "",
+            "events": [],
             "decisions": [
                 {
                     "duration": duration,
