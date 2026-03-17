@@ -481,19 +481,20 @@ class LogHandler(FileSystemEventHandler):
                     except Exception as e:
                         logger.error(f"Error parsing log line: {e}")
                         continue
-                        
-            try:
-                session.commit()
-            except Exception as e:
-                session.rollback()
-                logger.error(f"Final batch commit error: {e}")
-                record_stat("db_errors", 1)
                 
-            self.last_pos = f.tell()
-            if new_count > 0:
-                proc_time = (time.time() - start_time) * 1000 / max(new_count, 1)
-                record_stat("processing_time", proc_time)
-                logger.info(f"Processed {new_count} logs. Avg: {proc_time:.1f}ms/log")
+                self.last_pos = f.tell()
+                
+                try:
+                    session.commit()
+                except Exception as e:
+                    session.rollback()
+                    logger.error(f"Final batch commit error: {e}")
+                    record_stat("db_errors", 1)
+                
+                if new_count > 0:
+                    proc_time = (time.time() - start_time) * 1000 / max(new_count, 1)
+                    record_stat("processing_time", proc_time)
+                    logger.info(f"Processed {new_count} logs. Avg: {proc_time:.1f}ms/log")
         finally:
             session.close()
 
