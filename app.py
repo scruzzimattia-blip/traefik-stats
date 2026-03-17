@@ -546,6 +546,13 @@ else:
                     # Use 'scenario' as it's the actual field name from LAPI
                     cols = ['value', 'type', 'origin', 'duration', 'scenario', 'until']
                     d_df = d_df.reindex(columns=cols)
+                    
+                    if 'until' in d_df.columns:
+                        try:
+                            d_df['until'] = pd.to_datetime(d_df['until']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                        except:
+                            pass
+                            
                     st.dataframe(d_df, use_container_width=True)
                     
                     unblock_val = st.selectbox("Select IP to Unblock", options=[d['value'] for d in decisions])
