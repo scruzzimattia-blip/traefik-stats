@@ -460,7 +460,8 @@ else:
                             st.error(f"🚫 **Blocked:** {cs_status.get('type')} (Origin: {cs_status.get('origin')})")
                             st.caption(f"Reason: {cs_status.get('scenario')}")
                             st.caption(f"Until: {cs_status.get('until')}")
-                            if st.button("🔓 Unblock IP"):                                if cs.unblock_ip(ip_in):
+                            if st.button("🔓 Unblock IP"):
+                                if cs.unblock_ip(ip_in):
                                     st.success(f"IP {ip_in} unblocked!")
                                     st.rerun()
                         else:
