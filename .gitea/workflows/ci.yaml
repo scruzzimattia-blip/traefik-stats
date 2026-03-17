@@ -27,13 +27,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
       - name: Install linters
-        run: uv pip install ruff mypy types-requests types-redis --system
+        run: |
+          pip install --break-system-packages ruff mypy types-requests types-redis
 
       - name: Run Ruff
         run: ruff check --exit-zero .
@@ -60,16 +56,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
       - name: Install dependencies
         run: |
-          uv pip install -r requirements-app.txt --system || true
-          uv pip install -r requirements-worker.txt --system || true
-          uv pip install pytest pytest-cov pytest-mock --system
+          pip install --break-system-packages -r requirements-app.txt || true
+          pip install --break-system-packages -r requirements-worker.txt || true
+          pip install --break-system-packages pytest pytest-cov pytest-mock
 
       - name: Run tests
         env:
@@ -114,12 +105,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
       - name: Run security scan
         run: |
-          uv pip install safety bandit --system
+          pip install --break-system-packages safety bandit
           safety check --json | tee safety.json || true
           bandit -r . -f json -o bandit.json || true
 
