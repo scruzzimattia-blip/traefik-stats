@@ -19,6 +19,17 @@ def fetch_data(limit=50000):
         st.error(f"DB Error: {e}")
         return pd.DataFrame()
 
+def format_bytes(size):
+    """Formatiert Byte-Werte in menschenlesbare Formate (MB, GB, etc.)."""
+    if size is None: return "0 B"
+    power = 1024
+    n = 0
+    power_labels = {0: '', 1: 'K', 2: 'M', 3: 'G', 4: 'T', 5: 'P'}
+    while size > power and n < 5:
+        size /= power
+        n += 1
+    return f"{size:.2f} {power_labels[n]}B"
+
 @st.cache_data(ttl=3600)
 def get_abuse_reputation(ip):
     api_key = os.getenv("ABUSEIPDB_API_KEY")

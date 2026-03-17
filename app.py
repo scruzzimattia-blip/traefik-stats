@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
+import os
 import plotly.express as px
 import plotly.graph_objects as go
 from models import engine, AccessLog, SessionLocal
 from crowdsec import CrowdSecManager
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
-from data_service import fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated
+from data_service import fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated, format_bytes
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Traefik God Mode Monitor", layout="wide", page_icon="⚡")
@@ -123,6 +124,7 @@ else:
         "🌍 Security Map", 
         "🛡️ Security Audit", 
         "🚀 Performance", 
+        "📈 Bandwidth",
         "🛣️ Endpoints", 
         "🌐 Source/Referer", 
         "🤖 Client/Browser", 
@@ -371,6 +373,43 @@ else:
                 st.plotly_chart(px.histogram(df, x='content_size', nbins=50, template="plotly_dark"), use_container_width=True, key="content_size_histogram")
     
     with tabs[6]:
+            st.subheader("📈 Bandwidth Analysis")
+            
+            # Bandwidth Metrics
+            bw_c1, bw_c2, bw_c3 = st.columns(3)
+            with bw_c1:
+                total_bytes = df['content_size'].sum()
+                st.metric("Total Throughput", format_bytes(total_bytes))
+            with bw_c2:
+                avg_bytes = df['content_size'].mean()
+                st.metric("Avg Payload Size", format_bytes(avg_bytes))
+            with bw_c3:
+                max_bytes = df['content_size'].max()
+                st.metric("Peak Payload", format_bytes(max_bytes))
+            
+            # Bandwidth Timeline
+            st.write("**Throughput over Time**")
+            bw_timeline = df.set_index('start_local').groupby(pd.Grouper(freq='5min'))['content_size'].sum().reset_index()
+            bw_timeline['Formatted Size'] = bw_timeline['content_size'].apply(format_bytes)
+            st.plotly_chart(px.area(bw_timeline, x='start_local', y='content_size', template="plotly_dark", 
+                                   title="Traffic Volume (Bytes per 5min)", hover_data=['Formatted Size']), use_container_width=True, key="bw_timeline_chart")
+            
+            # Top Consumers
+            bw_col1, bw_col2 = st.columns(2)
+            with bw_col1:
+                st.write("**Top Hosts by Volume**")
+                host_vol = df.groupby('request_host')['content_size'].sum().sort_values(ascending=False).head(10).reset_index()
+                host_vol['Size'] = host_vol['content_size'].apply(format_bytes)
+                st.plotly_chart(px.bar(host_vol, x='content_size', y='request_host', orientation='h', template="plotly_dark", 
+                                       hover_data=['Size'], labels={'content_size': 'Bytes'}), use_container_width=True, key="bw_host_bar")
+            with bw_col2:
+                st.write("**Top Paths by Volume**")
+                path_vol = df.groupby('request_path')['content_size'].sum().sort_values(ascending=False).head(10).reset_index()
+                path_vol['Size'] = path_vol['content_size'].apply(format_bytes)
+                st.plotly_chart(px.bar(path_vol, x='content_size', y='request_path', orientation='h', template="plotly_dark", 
+                                       hover_data=['Size'], labels={'content_size': 'Bytes'}), use_container_width=True, key="bw_path_bar")
+
+    with tabs[7]:
             st.subheader("🛣️ Endpoint Analytics")
             path_stats = df.groupby('request_path').agg({
                 'id': 'count',
@@ -399,7 +438,7 @@ else:
                 st.write("**Most Unstable Endpoints**")
                 st.table(path_stats.sort_values('Error %', ascending=False).head(10)['Error %'])
     
-    with tabs[7]:
+    with tabs[8]:
             st.subheader("🌐 Source & Referer Analysis")
             col_s1, col_s2 = st.columns(2)
             with col_s1:
@@ -413,9 +452,10 @@ else:
                 
             st.write("**Top Entry Points**")
             entry_points = df['entry_point'].value_counts().reset_index()
+            # Hier war früher px.bar...
             st.plotly_chart(px.bar(entry_points, x='entry_point', y='count', template="plotly_dark"), use_container_width=True, key="entry_points_bar_chart")
     
-    with tabs[8]:
+    with tabs[9]:
             st.subheader("🤖 Client & Browser Analysis")
             col_c1, col_c2 = st.columns(2)
             with col_c1:
@@ -436,7 +476,7 @@ else:
             else:
                 st.info("No significant bot activity detected in this range.")
     
-    with tabs[9]:
+    with tabs[10]:
             st.subheader("🕵️ Advanced IP Investigator")
             ip_in = st.text_input("Deep Audit IP Address...").strip()
             if ip_in:
@@ -547,7 +587,7 @@ else:
                         st.info("No logs found for this IP.")
                 else: st.warning("IP not found.")
     
-    with tabs[10]:
+    with tabs[11]:
             st.subheader("📺 God Mode Live Stream")
             st.caption("Latest 200 requests (updates every sync)")
             live_df = df_full[['start_local', 'client_addr', 'country_code', 'request_host', 'request_path', 'status_code', 'is_attack']].head(200)
@@ -559,7 +599,7 @@ else:
             with c_l2:
                 st.download_button("Export as CSV", data=df.to_csv(index=False), file_name=f"traefik_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv")
     
-    with tabs[11]:
+    with tabs[12]:
             st.subheader("🧪 Error & 404 Lab")
             err_df = df[df['status_code'] >= 400]
             if not err_df.empty:
@@ -577,7 +617,7 @@ else:
             else:
                 st.success("Clean sheets! No errors in the current selection.")
     
-    with tabs[12]:
+    with tabs[13]:
             st.subheader("🚨 Malicious Activity Log")
             atk_only = df[df['is_attack'] == True]
             if not atk_only.empty:
@@ -586,7 +626,7 @@ else:
             else:
                 st.success("No malicious activity detected in the current range.")
     
-    with tabs[13]:
+    with tabs[14]:
             st.subheader("🛡️ CrowdSec Management Hub")
             cs = CrowdSecManager()
             
@@ -630,7 +670,7 @@ else:
                 else:
                     st.info("No active decisions in CrowdSec.")
     
-    with tabs[14]:
+    with tabs[15]:
             st.subheader("🏥 System Health & Database")
             col_h1, col_h2 = st.columns(2)
             with col_h1:
