@@ -42,7 +42,7 @@ jobs:
       - name: Login to Gitea Container Registry
         uses: docker/login-action@v3
         with:
-          registry: git.scruzzi.com
+          registry: containers.scruzzi.com
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
@@ -53,7 +53,7 @@ jobs:
           context: .
           file: ./Dockerfile.worker
           push: true
-          tags: git.scruzzi.com/traefik-stats/traefik-stats-worker:${{ github.sha }},git.scruzzi.com/traefik-stats/traefik-stats-worker:latest
+          tags: containers.scruzzi.com/traefik-stats/traefik-stats-worker:${{ github.sha }},containers.scruzzi.com/traefik-stats/traefik-stats-worker:latest
 
       - name: Build and push app image
         continue-on-error: true
@@ -62,7 +62,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: git.scruzzi.com/traefik-stats/traefik-stats-app:${{ github.sha }},git.scruzzi.com/traefik-stats/traefik-stats-app:latest
+          tags: containers.scruzzi.com/traefik-stats/traefik-stats-app:${{ github.sha }},containers.scruzzi.com/traefik-stats/traefik-stats-app:latest
 
       - name: Summary
         run: |
