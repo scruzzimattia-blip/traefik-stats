@@ -27,8 +27,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
       - name: Install linters
-        run: pip install ruff mypy types-requests types-redis
+        run: uv pip install ruff mypy types-requests types-redis --system
 
       - name: Run Ruff
         run: ruff check --exit-zero .
@@ -55,12 +60,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements-app.txt || true
-          pip install -r requirements-worker.txt || true
-          pip install pytest pytest-cov pytest-mock
+          uv pip install -r requirements-app.txt --system || true
+          uv pip install -r requirements-worker.txt --system || true
+          uv pip install pytest pytest-cov pytest-mock --system
 
       - name: Run tests
         env:
@@ -105,9 +114,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
       - name: Run security scan
         run: |
-          pip install safety bandit
+          uv pip install safety bandit --system
           safety check --json | tee safety.json || true
           bandit -r . -f json -o bandit.json || true
 
@@ -146,8 +158,6 @@ jobs:
           file: ./Dockerfile.worker
           push: true
           tags: gitea.${{ vars.GITEA_HOST }}/${{ github.repository }}/traefik-stats-worker:${{ github.sha }},gitea.${{ vars.GITEA_HOST }}/${{ github.repository }}/traefik-stats-worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Build and push app image
         uses: docker/build-push-action@v5
@@ -156,5 +166,3 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: gitea.${{ vars.GITEA_HOST }}/${{ github.repository }}/traefik-stats-app:${{ github.sha }},gitea.${{ vars.GITEA_HOST }}/${{ github.repository }}/traefik-stats-app:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
