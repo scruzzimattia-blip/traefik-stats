@@ -96,9 +96,10 @@ def test_log_processing(session, mock_geo, mock_crowdsec, tmp_path):
     }) + "\n")
     
     original_file = worker.LOG_FILE
+    
+    # Test 1: Safe log
     worker.LOG_FILE = str(safe_log)
     worker.SessionLocal = lambda: session
-    
     handler = worker.LogHandler(mock_geo, mock_crowdsec)
     handler.process_new_lines()
     
@@ -109,9 +110,10 @@ def test_log_processing(session, mock_geo, mock_crowdsec, tmp_path):
     assert entry.country_code == "DE"
     session.commit()
     
+    # Test 2: Attack log (new handler to avoid file state issues)
     worker.LOG_FILE = str(attack_log)
-    handler.last_pos = 0
-    handler.process_new_lines()
+    handler2 = worker.LogHandler(mock_geo, mock_crowdsec)
+    handler2.process_new_lines()
     
     entry = session.query(worker.AccessLog).filter_by(client_addr="9.9.9.9").first()
     assert entry is not None
@@ -120,9 +122,10 @@ def test_log_processing(session, mock_geo, mock_crowdsec, tmp_path):
     assert mock_crowdsec.blocked[0][0] == "9.9.9.9"
     session.commit()
     
+    # Test 3: Ignored IP (new handler)
     worker.LOG_FILE = str(ignored_log)
-    handler.last_pos = 0
-    handler.process_new_lines()
+    handler3 = worker.LogHandler(mock_geo, mock_crowdsec)
+    handler3.process_new_lines()
     
     entry = session.query(worker.AccessLog).filter_by(client_addr="127.0.0.1").first()
     assert entry is None
