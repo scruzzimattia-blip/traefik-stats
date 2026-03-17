@@ -13,7 +13,9 @@ services:
       - proxy
 
   worker:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile.worker
     container_name: traefik-stats-worker
     restart: unless-stopped
     depends_on:

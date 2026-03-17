@@ -7,6 +7,7 @@ from crowdsec import CrowdSecManager
 from sqlalchemy import select
 from datetime import datetime, timedelta
 from data_service import fetch_data
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Traefik God Mode Monitor", layout="wide", page_icon="⚡")
 
@@ -33,6 +34,20 @@ if df_full.empty:
 else:
     # --- SIDEBAR ---
     st.sidebar.title("🎮 Command Center")
+    
+    # Auto-Refresh
+    refresh_col1, refresh_col2 = st.sidebar.columns([1, 2])
+    with refresh_col1:
+        st.write("🔄 **Reload**")
+    with refresh_col2:
+        refresh_interval = st.selectbox("Interval", ["Off", "30s", "1m", "5m"], index=0, label_visibility="collapsed")
+        
+    if refresh_interval == "30s":
+        st_autorefresh(interval=30 * 1000, key="data_refresh")
+    elif refresh_interval == "1m":
+        st_autorefresh(interval=60 * 1000, key="data_refresh")
+    elif refresh_interval == "5m":
+        st_autorefresh(interval=300 * 1000, key="data_refresh")
     
     # System Pulse Widget
     with st.sidebar.expander("💓 System Pulse", expanded=True):

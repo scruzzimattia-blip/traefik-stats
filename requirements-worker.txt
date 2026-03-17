@@ -1,11 +1,6 @@
-streamlit
-pandas
-plotly
-jsonlines
 sqlalchemy
 psycopg2-binary
 watchdog
 user-agents
 maxminddb
-pytest
-pytest-mock
+requests

@@ -34,14 +34,25 @@ ATTACK_PATTERNS_COMPILED = [re.compile(p, re.IGNORECASE) for p in ATTACK_PATTERN
 
 IGNORED_IPS_SET = set(os.getenv("IGNORED_IPS", "92.106.189.142").split(","))
 
+# Precompute networks for CIDR support
+IGNORED_NETWORKS = []
+for ip_str in IGNORED_IPS_SET:
+    try:
+        IGNORED_NETWORKS.append(ipaddress.ip_network(ip_str.strip(), strict=False))
+    except ValueError:
+        pass
+
 def should_ignore_ip(ip_str):
-    if ip_str in IGNORED_IPS_SET:
-        return True
     try:
         ip = ipaddress.ip_address(ip_str)
-        return ip.is_private or ip.is_loopback or ip.is_link_local
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return True
+        for net in IGNORED_NETWORKS:
+            if ip in net:
+                return True
     except ValueError:
-        return False
+        pass
+    return False
 
 class GeoResolver:
     def __init__(self):
@@ -75,6 +86,22 @@ class LogHandler(FileSystemEventHandler):
         self.last_pos = 0
         self.blocked_ips_cache = set()
         self.whitelist_hosts = {"cloud.scruzzi.com", "jellyfin.scruzzi.com"}
+        self.error_tracker = {} # ip -> [list of timestamps]
+
+    def check_rate_limit(self, ip, timestamp, host):
+        if host in self.whitelist_hosts:
+            return False
+            
+        now = timestamp.timestamp()
+        if ip not in self.error_tracker:
+            self.error_tracker[ip] = []
+            
+        # keep only last 60 seconds
+        self.error_tracker[ip] = [t for t in self.error_tracker[ip] if now - t < 60]
+        self.error_tracker[ip].append(now)
+        
+        # Soft-Ban if > 20 errors in 60 seconds
+        return len(self.error_tracker[ip]) > 20
 
     def notify_discord(self, ip, reason, path, country_code):
         if not DISCORD_WEBHOOK: return
@@ -155,6 +182,14 @@ class LogHandler(FileSystemEventHandler):
                         attack = self.is_attack(path)
                         reason = f"Attack pattern: {path}" if attack else None
                         
+                        status_code = int(data.get('DownstreamStatus', 0)) if data.get('DownstreamStatus') else 0
+                        
+                        # Soft-Ban Check
+                        if not attack and status_code >= 400:
+                            if self.check_rate_limit(ip, log_time, host):
+                                attack = True
+                                reason = "Rate Limit Exceeded (High Error Rate)"
+                        
                         if attack and self.crowdsec and ip not in self.blocked_ips_cache:
                             # Automatic block in CrowdSec
                             self.crowdsec.block_ip(ip, reason=reason)
@@ -222,8 +257,28 @@ def prune_logs():
     except Exception as e: logger.error(f"Prune Error: {e}")
     finally: session.close()
 
+def notify_critical_error(err_msg):
+    if not DISCORD_WEBHOOK: return
+    try:
+        payload = {
+            "embeds": [{
+                "title": "🔥 God Mode Crash Alert",
+                "description": f"Worker encountered a critical error:\n```\n{err_msg}\n```",
+                "color": 0xFF0000,
+                "timestamp": datetime.now().isoformat()
+            }]
+        }
+        requests.post(DISCORD_WEBHOOK, json=payload, timeout=5)
+    except Exception: pass
+
 if __name__ == "__main__":
-    init_db()
+    try:
+        init_db()
+    except Exception as e:
+        logger.error(f"DB Init Error: {e}")
+        notify_critical_error(f"DB Init Error: {e}")
+        exit(1)
+        
     geo = GeoResolver()
     crowdsec = CrowdSecManager()
     logger.info("Ultra Worker started (Enhanced Sync + CrowdSec + Discord).")
@@ -246,5 +301,9 @@ if __name__ == "__main__":
                 prune_logs()
                 last_prune = time.time()
     except KeyboardInterrupt:
+        observer.stop()
+    except Exception as e:
+        logger.error(f"Critical Worker Loop Error: {e}")
+        notify_critical_error(f"Worker Loop Error: {e}")
         observer.stop()
     observer.join()
