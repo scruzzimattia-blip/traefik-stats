@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func
 import re
 import requests
+import ipaddress
 
 LOG_FILE = "/app/logs/access.log"
 CITY_DB = "/app/geoip/city.mmdb"
@@ -29,6 +30,13 @@ ATTACK_PATTERNS = [
     r"perl\s", r"bash\s", r"sh\s", r"cgi-bin", r"admin/config", r"wp-config",
     r"\.git", r"\.svn", r"\.htaccess", r"id_rsa", r"id_dsa", r"shadow", r"htpasswd"
 ]
+
+def is_local_ip(ip_str):
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        return False
 
 class GeoResolver:
     def __init__(self):
@@ -118,6 +126,11 @@ class LogHandler(FileSystemEventHandler):
                             continue
                         
                         ip = self.clean_ip(data.get('ClientAddr', ''))
+                        
+                        # Skip monitoring for local IPs
+                        if is_local_ip(ip):
+                            continue
+
                         geo_info = self.geo.resolve(ip)
                         ua = parse(data.get('RequestUserAgent', ''))
                         path = data.get('RequestPath', '')
