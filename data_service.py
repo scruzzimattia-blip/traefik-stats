@@ -2,10 +2,15 @@ import pandas as pd
 import streamlit as st
 import requests
 import os
+from datetime import datetime, timedelta
+import logging
 from models import engine, AccessLog, SessionLocal, LoginAttempt, BlockedCountry, WorkerStats, PrecomputedStats
 from sqlalchemy import func, select, and_, or_
+from cache_service import CacheService, cached
 
-@st.cache_data(ttl=60)
+logger = logging.getLogger(__name__)
+
+@cached(ttl=60, key_prefix="fetch_data")
 def fetch_data(limit=50000):
     try:
         query = select(AccessLog).order_by(AccessLog.start_local.desc()).limit(limit)
@@ -19,7 +24,7 @@ def fetch_data(limit=50000):
         st.error(f"DB Error: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@cached(ttl=300, key_prefix="precomputed_stats")
 def fetch_precomputed_stats(stat_type: str, period: str = "24h") -> dict:
     try:
         stats = SessionLocal().query(PrecomputedStats).filter(
@@ -75,14 +80,14 @@ def update_precomputed_stats():
                         session.add(PrecomputedStats(stat_type="avg_latency", period=period, key=path, value=float(avg_ms)))
         
         session.commit()
+        CacheService.delete_pattern("traefik_stats:fetch_data:*")
+        CacheService.delete_pattern("traefik_stats:precomputed_stats:*")
     except Exception as e:
         logger.error(f"Precompute error: {e}")
     finally:
         session.close()
 
-from datetime import datetime, timedelta
-import logging
-logger = logging.getLogger(__name__)
+
 
 def format_bytes(size):
     if size is None: return "0 B"
@@ -94,7 +99,7 @@ def format_bytes(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
-@st.cache_data(ttl=3600)
+@cached(ttl=3600, key_prefix="abuse_reputation")
 def get_abuse_reputation(ip):
     api_key = os.getenv("ABUSEIPDB_API_KEY")
     if not api_key:
@@ -113,6 +118,11 @@ def get_abuse_reputation(ip):
     return None
 
 def get_total_logs_count(filter_attack=False):
+    cache_key = f"traefik_stats:logs_count:{filter_attack}"
+    cached = CacheService.get(cache_key)
+    if cached is not None:
+        return cached
+    
     try:
         session = SessionLocal()
         query = session.query(func.count(AccessLog.id))
@@ -120,6 +130,7 @@ def get_total_logs_count(filter_attack=False):
             query = query.filter(AccessLog.is_attack == True)
         count = query.scalar()
         session.close()
+        CacheService.set(cache_key, count, ttl=30)
         return count
     except Exception as e:
         st.error(f"Error counting logs: {e}")
@@ -194,6 +205,11 @@ def get_bandwidth_spikes(hours=24):
         return pd.DataFrame()
 
 def get_threat_leaders(limit=20):
+    cache_key = f"traefik_stats:threat_leaders:{limit}"
+    cached = CacheService.get(cache_key)
+    if cached is not None:
+        return pd.DataFrame(cached) if cached else pd.DataFrame()
+    
     try:
         from crowdsec import CrowdSecManager
         cs = CrowdSecManager()
@@ -212,14 +228,24 @@ def get_threat_leaders(limit=20):
         if blocked_ips:
             df = df[~df['client_addr'].isin(blocked_ips)]
         
+        result = df.head(limit).to_dict('records')
+        CacheService.set(cache_key, result, ttl=300)
         return df.head(limit)
     except Exception as e:
         logger.error(f"Threat leaders error: {e}")
         return pd.DataFrame()
 
 def get_blocked_countries():
+    cache_key = "traefik_stats:blocked_countries"
+    cached = CacheService.get(cache_key)
+    if cached is not None:
+        return [BlockedCountry(**c) for c in cached] if cached else []
+    
     try:
-        return SessionLocal().query(BlockedCountry).all()
+        countries = SessionLocal().query(BlockedCountry).all()
+        countries_data = [{"id": c.id, "country_code": c.country_code, "reason": c.reason, "added_at": c.added_at, "active": c.active} for c in countries]
+        CacheService.set(cache_key, countries_data, ttl=60)
+        return countries
     except:
         return []
 
@@ -231,6 +257,7 @@ def add_blocked_country(country_code: str, reason: str = ""):
             blocked = BlockedCountry(country_code=country_code.upper(), reason=reason, active=True)
             session.add(blocked)
             session.commit()
+            CacheService.delete("traefik_stats:blocked_countries")
             return True
     except Exception as e:
         logger.error(f"Block country error: {e}")
@@ -245,6 +272,7 @@ def remove_blocked_country(country_code: str):
         if entry:
             entry.active = False
             session.commit()
+            CacheService.delete("traefik_stats:blocked_countries")
             return True
     except Exception as e:
         logger.error(f"Remove block error: {e}")

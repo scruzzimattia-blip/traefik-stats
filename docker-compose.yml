@@ -55,6 +55,7 @@ services:
     restart: unless-stopped
     depends_on:
       - db
+      - redis
     entrypoint: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/traefik_stats
@@ -62,6 +63,7 @@ services:
       CROWDSEC_LAPI_KEY: ${CROWDSEC_LAPI_KEY}
       CROWDSEC_MACHINE_PASSWORD: ${CROWDSEC_MACHINE_PASSWORD}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - /home/mattia/proxy/data/crowdsec/data/GeoLite2-City.mmdb:/app/geoip/city.mmdb:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

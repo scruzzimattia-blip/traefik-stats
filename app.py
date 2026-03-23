@@ -7,6 +7,7 @@ from models import engine, AccessLog, SessionLocal
 from crowdsec import CrowdSecManager
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
+from cache_service import CacheService, invalidate_cache
 from data_service import (
     fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated, format_bytes,
     get_login_attempts, get_top_slowest_endpoints, get_error_trends, get_bandwidth_spikes,
@@ -500,7 +501,8 @@ else:
                 
                 if st.button("🔄 Clear Cache"):
                     st.cache_data.clear()
-                    st.success("Cache cleared")
+                    CacheService.clear_all()
+                    st.success("Cache cleared (Streamlit + Redis)")
                 
                 if st.button("📊 Update Precomputed Stats"):
                     update_precomputed_stats()
