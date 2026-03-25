@@ -27,6 +27,47 @@ ASN_DB = os.getenv("ASN_DB", "/app/geoip/asn.mmdb")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 REDIS_URL = os.getenv("REDIS_URL", None)
 
+# ============================================================================
+# WORKER CONFIGURATION CONSTANTS
+# ============================================================================
+
+# Rate limiting
+RATE_LIMIT_THRESHOLD = int(os.getenv("RATE_LIMIT_THRESHOLD", "50"))
+RATE_LIMIT_BAN_DURATION_HOURS = 1
+
+# Threading & Performance
+EXECUTOR_MAX_WORKERS = 10
+BATCH_COMMIT_SIZE = 100
+BLOCKED_IP_CACHE_CLEANUP_THRESHOLD = 10000
+
+# Maintenance intervals (seconds)
+MAIN_LOOP_SLEEP_INTERVAL = 30
+PRUNE_INTERVAL_SECONDS = 3600  # 1 hour
+STATS_FLUSH_INTERVAL_SECONDS = 300  # 5 minutes
+PATTERN_RELOAD_INTERVAL_SECONDS = 60  # 1 minute
+
+# Data retention
+DEFAULT_LOG_RETENTION_DAYS = 30
+DEFAULT_LOGIN_ATTEMPT_RETENTION_DAYS = 7
+BLOCKED_IP_CACHE_TTL_SECONDS = 21600  # 6 hours
+
+# Threat scoring
+THREAT_SCORE_ATTACK_BASE = 30
+THREAT_SCORE_SQL_INJECTION = 20
+THREAT_SCORE_CODE_EXECUTION = 25
+THREAT_SCORE_CONFIG_FILES = 15
+THREAT_SCORE_LOGIN_FAILURE = 40
+THREAT_SCORE_404_ERROR = 5
+THREAT_SCORE_500_ERROR = 10
+MAX_THREAT_SCORE = 100
+
+# CrowdSec
+CROWDSEC_BAN_DURATION = "24h"
+CROWDSEC_REQUEST_TIMEOUT = 5
+
+# Processing stats
+MAX_PROCESSING_TIME_SAMPLES = 100
+
 class JSONFormatter(logging.Formatter):
     def format(self, record):
         log_obj = {
@@ -48,7 +89,7 @@ if os.getenv("LOG_FORMAT") == "json":
 
 logger.info("Starting Traefik God Mode Worker v2.0")
 
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=EXECUTOR_MAX_WORKERS)
 
 redis_client = None
 if REDIS_URL:
@@ -65,8 +106,8 @@ def record_stat(key: str, value: Any):
     with STATS_LOCK:
         if key == "processing_time":
             STATS["processing_times"].append(value)
-            if len(STATS["processing_times"]) > 100:
-                STATS["processing_times"] = STATS["processing_times"][-100:]
+            if len(STATS["processing_times"]) > MAX_PROCESSING_TIME_SAMPLES:
+                STATS["processing_times"] = STATS["processing_times"][-MAX_PROCESSING_TIME_SAMPLES:]
         elif key in STATS:
             STATS[key] += value
 
@@ -190,22 +231,23 @@ def is_country_blocked(country_code: Optional[str]) -> bool:
         return country_code in _blocked_countries_cache
 
 def calculate_threat_score(ip: str, path: str, is_attack: bool, status_code: int, login_attempt: bool) -> int:
+    \"\"\"Calculate threat score for a request (0-100 scale).\"\"\"
     score = 0
     if is_attack:
-        score += 30
+        score += THREAT_SCORE_ATTACK_BASE
         if any(p in path.lower() for p in ["sql", "union", "select", "drop"]):
-            score += 20
+            score += THREAT_SCORE_SQL_INJECTION
         if any(p in path.lower() for p in ["exec", "eval", "system", "shell"]):
-            score += 25
+            score += THREAT_SCORE_CODE_EXECUTION
         if ".env" in path or ".git" in path:
-            score += 15
+            score += THREAT_SCORE_CONFIG_FILES
     if login_attempt and status_code >= 400:
-        score += 40
+        score += THREAT_SCORE_LOGIN_FAILURE
     if status_code == 404:
-        score += 5
+        score += THREAT_SCORE_404_ERROR
     if status_code >= 500:
-        score += 10
-    return min(score, 100)
+        score += THREAT_SCORE_500_ERROR
+    return min(score, MAX_THREAT_SCORE)
 
 def parse_user_agent(ua_string: str):
     """Safely parse user agent string with fallback for invalid input."""
@@ -283,10 +325,6 @@ class GeoResolver:
             logger.debug(f"GeoIP resolution error for {ip}: {e}")
         return res
 
-RATE_LIMIT_THRESHOLD = int(os.getenv("RATE_LIMIT_THRESHOLD", "50"))
-# Time-to-live for blocked IPs cache in seconds (6 hours)
-BLOCKED_IP_CACHE_TTL = int(os.getenv("BLOCKED_IP_CACHE_TTL", "21600"))
-
 class LogHandler(FileSystemEventHandler):
     """File handler for processing Traefik access logs in real-time."""
     
@@ -316,7 +354,7 @@ class LogHandler(FileSystemEventHandler):
     def _should_block_ip(self, ip: str) -> bool:
         """Check if IP should be blocked, return True if not already blocked."""
         # Cleanup old entries periodically (when cache exceeds threshold)
-        if len(self.blocked_ips_cache) > 10000:
+        if len(self.blocked_ips_cache) > BLOCKED_IP_CACHE_CLEANUP_THRESHOLD:
             self._cleanup_blocked_ips_cache()
         
         return ip not in self.blocked_ips_cache
@@ -381,7 +419,7 @@ class LogHandler(FileSystemEventHandler):
             entry.error_count = count
             entry.is_soft_banned = banned
             if banned:
-                entry.ban_expires = datetime.now() + timedelta(hours=1)
+                entry.ban_expires = datetime.now() + timedelta(hours=RATE_LIMIT_BAN_DURATION_HOURS)
             entry.last_error_time = datetime.now()
             session.commit()
         except Exception as e:
@@ -534,7 +572,7 @@ class LogHandler(FileSystemEventHandler):
                         threat_score = calculate_threat_score(ip, path, attack, status_code, is_login)
                         
                         if attack and self.crowdsec and self._should_block_ip(ip):
-                            executor.submit(self.crowdsec.block_ip, ip, "24h", reason)
+                            executor.submit(self.crowdsec.block_ip, ip, CROWDSEC_BAN_DURATION, reason)
                             executor.submit(self.notify_discord, ip, reason, path, geo_info.get("country_code"))
                             self._add_to_blocked_ips_cache(ip)
                             record_stat("ips_banned", 1)
@@ -570,7 +608,7 @@ class LogHandler(FileSystemEventHandler):
                         if attack:
                             record_stat("attacks_detected", 1)
                         
-                        if new_count % 100 == 0:
+                        if new_count % BATCH_COMMIT_SIZE == 0:
                             try:
                                 session.commit()
                             except Exception as e:
@@ -682,21 +720,21 @@ if __name__ == "__main__":
     
     try:
         while True:
-            time.sleep(30)
+            time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
             handler.process_new_lines()
             
             current_time = time.time()
             
-            if current_time - last_prune > 3600:
+            if current_time - last_prune > PRUNE_INTERVAL_SECONDS:
                 prune_logs()
                 prune_login_attempts()
                 last_prune = current_time
             
-            if current_time - last_stats_flush > 300:
+            if current_time - last_stats_flush > STATS_FLUSH_INTERVAL_SECONDS:
                 flush_stats()
                 last_stats_flush = current_time
             
-            if current_time - last_pattern_reload > 60:
+            if current_time - last_pattern_reload > PATTERN_RELOAD_INTERVAL_SECONDS:
                 reload_attack_patterns()
                 load_blocked_countries()
                 last_pattern_reload = current_time
