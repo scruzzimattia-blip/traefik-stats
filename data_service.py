@@ -27,8 +27,9 @@ def fetch_data(limit=50000):
 @cached(ttl=300, key_prefix="precomputed_stats")
 def fetch_precomputed_stats(stat_type: str, period: str = "24h") -> dict:
     """Fetch precomputed statistics from database."""
+    session = SessionLocal()
     try:
-        stats = SessionLocal().query(PrecomputedStats).filter(
+        stats = session.query(PrecomputedStats).filter(
             PrecomputedStats.stat_type == stat_type,
             PrecomputedStats.period == period
         ).all()
@@ -36,6 +37,8 @@ def fetch_precomputed_stats(stat_type: str, period: str = "24h") -> dict:
     except Exception as e:
         logger.error(f"Precomputed stats fetch error: {e}")
         return {}
+    finally:
+        session.close()
 
 def update_precomputed_stats():
     session = SessionLocal()
@@ -245,14 +248,17 @@ def get_blocked_countries():
     if cached is not None:
         return [BlockedCountry(**c) for c in cached] if cached else []
     
+    session = SessionLocal()
     try:
-        countries = SessionLocal().query(BlockedCountry).all()
+        countries = session.query(BlockedCountry).all()
         countries_data = [{"id": c.id, "country_code": c.country_code, "reason": c.reason, "added_at": c.added_at, "active": c.active} for c in countries]
         CacheService.set(cache_key, countries_data, ttl=60)
         return countries
     except Exception as e:
         logger.error(f"Failed to fetch blocked countries: {e}")
         return []
+    finally:
+        session.close()
 
 def add_blocked_country(country_code: str, reason: str = ""):
     session = SessionLocal()
@@ -287,9 +293,10 @@ def remove_blocked_country(country_code: str):
 
 def get_worker_stats(hours=24):
     """Get worker statistics for the last N hours."""
+    session = SessionLocal()
     try:
         cutoff = datetime.now() - timedelta(hours=hours)
-        stats = SessionLocal().query(WorkerStats).filter(WorkerStats.timestamp > cutoff).all()
+        stats = session.query(WorkerStats).filter(WorkerStats.timestamp > cutoff).all()
         return [{
             "timestamp": s.timestamp,
             "logs_processed": s.logs_processed,
@@ -301,3 +308,5 @@ def get_worker_stats(hours=24):
     except Exception as e:
         logger.error(f"Worker stats error: {e}")
         return []
+    finally:
+        session.close()
