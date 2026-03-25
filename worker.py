@@ -20,6 +20,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict
 import threading
 import redis
+import signal
 
 LOG_FILE = os.getenv("LOG_FILE", "/app/logs/access.log")
 CITY_DB = os.getenv("CITY_DB", "/app/geoip/city.mmdb")
@@ -67,6 +68,25 @@ CROWDSEC_REQUEST_TIMEOUT = 5
 
 # Processing stats
 MAX_PROCESSING_TIME_SAMPLES = 100
+
+# ============================================================================
+# GRACEFUL SHUTDOWN HANDLING
+# ============================================================================
+_shutdown_event = threading.Event()
+_shutdown_initiated = False
+
+def signal_handler(signum, frame):
+    \"\"\"Handle termination signals for graceful shutdown.\"\"\"
+    global _shutdown_initiated
+    if not _shutdown_initiated:
+        _shutdown_initiated = True
+        logger.info(f"Received signal {signum}. Initiating graceful shutdown...")
+        _shutdown_event.set()
+
+def register_signal_handlers():
+    \"\"\"Register signal handlers for graceful shutdown.\"\"\"
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -695,6 +715,9 @@ def health_check() -> dict:
 START_TIME = time.time()
 
 if __name__ == "__main__":
+    # Register signal handlers for graceful shutdown
+    register_signal_handlers()
+    
     try:
         init_db()
         load_blocked_countries()
@@ -702,7 +725,6 @@ if __name__ == "__main__":
         logger.error(f"DB Init Error: {e}")
         notify_critical_error(f"DB Init Error: {e}")
         exit(1)
-        
     geo = GeoResolver()
     crowdsec = CrowdSecManager()
     logger.info("Ultra Worker v2.0 started (Enhanced + Retry + Redis + Metrics)")
@@ -719,7 +741,7 @@ if __name__ == "__main__":
     last_pattern_reload = time.time()
     
     try:
-        while True:
+        while not _shutdown_event.is_set():
             time.sleep(MAIN_LOOP_SLEEP_INTERVAL)
             handler.process_new_lines()
             
@@ -741,12 +763,22 @@ if __name__ == "__main__":
                 
     except KeyboardInterrupt:
         logger.info("Worker shutdown requested")
-        observer.stop()
     except Exception as e:
         logger.error(f"Critical Worker Loop Error: {e}")
         notify_critical_error(f"Worker Loop Error: {e}")
-        observer.stop()
     finally:
+        logger.info("Stopping observer...")
+        observer.stop()
         observer.join()
+        
+        logger.info("Flushing final statistics...")
+        flush_stats()
+        
+        logger.info("Closing GeoResolver...")
         geo.close()
-        logger.info("Worker cleanup completed")
+        
+        logger.info("Closing database connections...")
+        # Close all remaining sessions
+        SessionLocal().close()
+        
+        logger.info("Worker cleanup completed - exiting gracefully")
