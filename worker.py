@@ -119,12 +119,15 @@ class TraefikLogData(BaseModel):
     Duration: Any = 0
     DownstreamContentSize: Any = 0
 
+WHITELIST_HOSTS = set(os.getenv("WHITELIST_HOSTS", "cloud.scruzzi.com,jellyfin.scruzzi.com").split(","))
+
 ATTACK_PATTERNS = [
-    r"\.\./", r"etc/passwd", r"wp-login", r"sql", r"phpinfo", r"eval\(", 
+    r"\.\./", r"etc/passwd", r"wp-login", r"phpinfo", r"eval\(", 
     r"base64_", r"\.env", r"cmd\.exe", r"/proc/self/", r"<script>", r"SELECT%20",
     r"union\s+select", r"sys_exec", r"shell_exec", r"wget\s", r"curl\s", r"python\s",
     r"perl\s", r"bash\s", r"sh\s", r"cgi-bin", r"admin/config", r"wp-config",
-    r"\.git", r"\.svn", r"\.htaccess", r"id_rsa", r"id_dsa", r"shadow", r"htpasswd"
+    r"/\.git/", r"\.svn", r"\.htaccess", r"id_rsa", r"id_dsa", r"shadow", r"htpasswd",
+    r"UNION ALL SELECT", r"INFORMATION_SCHEMA", r"DROP TABLE", r"INSERT INTO"
 ]
 
 LOGIN_PATTERNS = [
@@ -228,13 +231,15 @@ class GeoResolver:
         except: pass
         return res
 
+RATE_LIMIT_THRESHOLD = int(os.getenv("RATE_LIMIT_THRESHOLD", "50"))
+
 class LogHandler(FileSystemEventHandler):
     def __init__(self, geo, crowdsec=None):
         self.geo = geo
         self.crowdsec = crowdsec
         self.last_pos = 0
         self.blocked_ips_cache = set()
-        self.whitelist_hosts = {"cloud.scruzzi.com", "jellyfin.scruzzi.com"}
+        self.whitelist_hosts = WHITELIST_HOSTS
         self.error_tracker = {}
         self.max_retries = 3
 
@@ -302,9 +307,9 @@ class LogHandler(FileSystemEventHandler):
             return True
         
         error_count += 1
-        self.set_rate_limit_redis(ip, error_count, error_count > 20)
+        self.set_rate_limit_redis(ip, error_count, error_count > RATE_LIMIT_THRESHOLD)
         
-        return error_count > 20
+        return error_count > RATE_LIMIT_THRESHOLD
 
     def notify_discord(self, ip: str, reason: str, path: str, country_code: str):
         if not DISCORD_WEBHOOK: return
