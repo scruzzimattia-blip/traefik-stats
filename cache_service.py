@@ -71,7 +71,12 @@ def _deserialize(value: Optional[str]) -> Any:
                 return pd.read_json(StringIO(data["data"]), orient="split")
             except Exception as e:
                 logger.warning(f"Failed to deserialize DataFrame: {e}")
-                return data
+                # Try to return an empty DataFrame as fallback if it was supposed to be one
+                try:
+                    import pandas as pd
+                    return pd.DataFrame()
+                except:
+                    return data
         return data
     except:
         return value
