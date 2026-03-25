@@ -331,11 +331,22 @@ class LogHandler(FileSystemEventHandler):
         return self.set_rate_limit_db(ip, count, banned)
 
     def get_rate_limit_db(self, ip: str) -> tuple[int, bool]:
+        \"\"\"Get rate limit from DB, checking if ban has expired.\"\"\"
         session = SessionLocal()
         try:
             entry = session.query(RateLimitEntry).filter_by(ip_address=ip).first()
             if entry:
+                # Check if ban has expired
+                if entry.is_soft_banned and entry.ban_expires:
+                    if datetime.now() > entry.ban_expires:
+                        # Ban expired, reset it
+                        entry.is_soft_banned = False
+                        entry.error_count = 0
+                        session.commit()
+                        return 0, False
                 return entry.error_count, entry.is_soft_banned
+        except Exception as e:
+            logger.debug(f\"Rate limit DB get error: {e}\")
         finally:
             session.close()
         return 0, False
