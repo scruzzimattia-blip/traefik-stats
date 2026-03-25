@@ -207,6 +207,26 @@ def calculate_threat_score(ip: str, path: str, is_attack: bool, status_code: int
         score += 10
     return min(score, 100)
 
+def parse_user_agent(ua_string: str):
+    """Safely parse user agent string with fallback for invalid input."""
+    try:
+        return parse(ua_string or "")
+    except Exception as e:
+        logger.debug(f"User agent parse error: {e}")
+        # Return a safe default with no bot, unknown browser/OS/device
+        class SafeUA:
+            is_bot = False
+            class Browser:
+                family = "Unknown"
+            class OS:
+                family = "Unknown"
+            class Device:
+                family = "Unknown"
+            browser = Browser()
+            os = OS()
+            device = Device()
+        return SafeUA()
+
 class GeoResolver:
     """Manages MaxMindDB GeoIP lookups with proper resource cleanup."""
     
@@ -484,7 +504,7 @@ class LogHandler(FileSystemEventHandler):
                             record_stat("attacks_detected", 1)
                             continue
 
-                        ua = parse(log_data.RequestUserAgent)
+                        ua = parse_user_agent(log_data.RequestUserAgent)
                         path = log_data.RequestPath
                         host = log_data.RequestHost
                         
