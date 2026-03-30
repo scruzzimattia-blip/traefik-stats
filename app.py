@@ -241,32 +241,45 @@ else:
                 st.write(f"**Bot Traffic:** {bot_count:,} ({bot_pct:.1f}%)")
     
     with tabs[1]:
+            # Use full data for security analysis to avoid sidebar filter interference
+            df_attacks_all = df_full[df_full['is_attack'] == True].copy()
+            
+            # Apply time filter if needed, or keep it consistent with the main view
+            # Usually users want to see security stats for the SELECTED time range
+            df_sec = df[df['is_attack'] == True].copy() if not df.empty else pd.DataFrame()
+            
             col_s1, col_s2, col_s3, col_s4 = st.columns(4)
             with col_s1:
-                st.metric("🚨 Attacks", len(df[df['is_attack'] == True]))
+                st.metric("🚨 Attacks", len(df_sec))
             with col_s2:
-                st.metric("🌍 Countries", df[df['is_attack'] == True]['country_code'].nunique())
+                st.metric("🌍 Countries", df_sec['country_code'].nunique() if not df_sec.empty else 0)
             with col_s3:
-                st.metric("🔴 Suspicious IPs", df[df['is_attack'] == True]['client_addr'].nunique())
+                st.metric("🔴 Suspicious IPs", df_sec['client_addr'].nunique() if not df_sec.empty else 0)
             with col_s4:
-                attack_rate = (len(df[df['is_attack'] == True]) / len(df) * 100) if len(df) > 0 else 0
+                # Use unfiltered df size for the rate to be accurate
+                total_reqs = len(df) if not df.empty else 1
+                attack_rate = (len(df_sec) / total_reqs * 100)
                 st.metric("📊 Attack Rate", f"{attack_rate:.1f}%")
             
             sec_col1, sec_col2 = st.columns(2)
             with sec_col1:
                 st.subheader("🌍 Attack Geography")
-                attack_df = df[df['is_attack'] == True].groupby(['country_name', 'country_code']).size().reset_index(name='Attacks')
-                if not attack_df.empty:
-                    st.plotly_chart(px.scatter_geo(attack_df, locations="country_code", size="Attacks", hover_name="country_name",
+                if not df_sec.empty:
+                    attack_geo_df = df_sec.groupby(['country_name', 'country_code']).size().reset_index(name='Attacks')
+                    st.plotly_chart(px.scatter_geo(attack_geo_df, locations="country_code", size="Attacks", hover_name="country_name",
                                                   projection="natural earth", template="plotly_dark", color="Attacks",
                                                   color_continuous_scale="Reds"), use_container_width=True)
+                else:
+                    st.info("No attack data for the selected range.")
                 
                 st.write("**Top Attack Paths**")
-                st.table(df[df['is_attack'] == True]['request_path'].value_counts().head(10))
+                if not df_sec.empty:
+                    st.table(df_sec['request_path'].value_counts().head(10))
                 
                 st.write("**Most Block-worthy IPs**")
-                audit_ips = df[df['is_attack'] == True].groupby('client_addr').agg({'id':'count', 'country_code':'first', 'asn':'first'}).sort_values('id', ascending=False)
-                st.dataframe(audit_ips.head(10), use_container_width=True)
+                if not df_sec.empty:
+                    audit_ips = df_sec.groupby('client_addr').agg({'id':'count', 'country_code':'first', 'asn':'first'}).sort_values('id', ascending=False)
+                    st.dataframe(audit_ips.head(10), use_container_width=True)
             
             with sec_col2:
                 st.subheader("🚨 Attack Log")
