@@ -573,6 +573,12 @@ class LogHandler(FileSystemEventHandler):
                 
             if os.path.getsize(LOG_FILE) < self.last_pos:
                 self.last_pos = 0
+            
+            if self.last_pos == 0 and latest_db_entry:
+                file_size = os.path.getsize(LOG_FILE)
+                if file_size > 1024 * 1024:
+                    self.last_pos = max(0, file_size - 1024 * 100)
+                    logger.info(f"Large file detected ({file_size/1024/1024:.0f}MB), jumping to near end to skip historical logs")
 
             with open(LOG_FILE, 'r') as f:
                 f.seek(self.last_pos)
