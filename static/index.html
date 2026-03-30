@@ -80,7 +80,7 @@
         <h1>Access Denied</h1>
         
         <div class="reason-box">
-            <div class="reason-label">IP Security Restriction</div>
+            <div class="reason-label">Security Protocol Violation</div>
             <p id="block-reason">Malicious activity detected by security system</p>
         </div>
         
@@ -93,13 +93,32 @@
     </div>
 
     <script>
-        // Extract parameters from URL
+        const translationMap = {
+            'crowdsecurity/http-path-traversal-probing': 'Attempted to access restricted system files (Path Traversal).',
+            'crowdsecurity/http-sqli-probing': 'SQL injection attack pattern detected.',
+            'crowdsecurity/http-xss-probing': 'Cross-Site Scripting (XSS) attempt detected.',
+            'crowdsecurity/http-generic-bf': 'Brute-force attack pattern detected.',
+            'crowdsecurity/http-crawl-non_statics': 'Aggressive automated crawling detected.',
+            'crowdsecurity/http-probing': 'Automated vulnerability scanning detected.',
+            'crowdsecurity/http-bad-user-agent': 'Access attempt from a malicious or blacklisted bot.',
+            'crowdsecurity/http-cve-2021-44228': 'Log4j exploitation attempt detected.',
+            'traefik-god-mode': 'Manual block or custom attack pattern triggered.'
+        };
+
         const urlParams = new URLSearchParams(window.location.search);
-        const reason = urlParams.get('reason');
+        let reason = urlParams.get('reason');
         const ip = urlParams.get('ip');
 
         if (reason) {
-            document.getElementById('block-reason').textContent = reason.replace(/\+/g, ' ');
+            reason = reason.replace(/\+/g, ' ');
+            // Try translation
+            for (const [key, value] of Object.entries(translationMap)) {
+                if (reason.includes(key)) {
+                    reason = value;
+                    break;
+                }
+            }
+            document.getElementById('block-reason').textContent = reason;
         }
         if (ip) {
             document.getElementById('client-ip').textContent = ip;
