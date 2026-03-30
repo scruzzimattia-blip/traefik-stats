@@ -215,10 +215,18 @@ else:
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 st.subheader("🌐 Traffic by Country")
-                geo_counts = df.groupby('country_code').size().reset_index(name='Requests')
-                geo_counts = geo_counts.merge(df[['country_code', 'country_name']].drop_duplicates(), on='country_code', how='left')
-                st.plotly_chart(px.scatter_geo(geo_counts, locations="country_code", hover_name="country_name", size="Requests",
-                                              projection="natural earth", template="plotly_dark"), use_container_width=True)
+                geo_counts = df.groupby('country_name').size().reset_index(name='Requests')
+                if not geo_counts.empty:
+                    st.plotly_chart(px.choropleth(geo_counts, 
+                                                 locations="country_name", 
+                                                 locationmode='country names',
+                                                 color="Requests",
+                                                 hover_name="country_name", 
+                                                 projection="natural earth", 
+                                                 template="plotly_dark",
+                                                 color_continuous_scale="Viridis"), use_container_width=True)
+                else:
+                    st.info("No traffic data for map.")
             
             with col_d2:
                 st.subheader("📈 Traffic Timeline")
@@ -265,9 +273,14 @@ else:
             with sec_col1:
                 st.subheader("🌍 Attack Geography")
                 if not df_sec.empty:
-                    attack_geo_df = df_sec.groupby(['country_name', 'country_code']).size().reset_index(name='Attacks')
-                    st.plotly_chart(px.scatter_geo(attack_geo_df, locations="country_code", size="Attacks", hover_name="country_name",
-                                                  projection="natural earth", template="plotly_dark", color="Attacks",
+                    attack_geo_df = df_sec.groupby('country_name').size().reset_index(name='Attacks')
+                    st.plotly_chart(px.choropleth(attack_geo_df, 
+                                                  locations="country_name", 
+                                                  locationmode='country names',
+                                                  color="Attacks", 
+                                                  hover_name="country_name",
+                                                  projection="natural earth", 
+                                                  template="plotly_dark",
                                                   color_continuous_scale="Reds"), use_container_width=True)
                 else:
                     st.info("No attack data for the selected range.")
