@@ -133,6 +133,18 @@ class PrecomputedStats(Base):
         Index('idx_stat_period', 'stat_type', 'period'),
     )
 
+class BouncerEvent(Base):
+    """Logs of IPs redirected by the Traefik bouncer."""
+    __tablename__ = 'bouncer_events'
+    
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.now, index=True)
+    ip_address = Column(String(MAX_IP_LENGTH), index=True)
+    reason = Column(String(MAX_REASON_LENGTH))
+    target_url = Column(String)
+    user_agent = Column(String)
+    country_code = Column(String(MAX_COUNTRY_CODE_LENGTH))
+
 engine_args = {"pool_pre_ping": True}
 if not DB_URL.startswith("sqlite"):
     engine_args.update({"pool_size": 10, "max_overflow": 20})
