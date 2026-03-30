@@ -71,8 +71,6 @@ jobs:
             192.168.1.41:3000/${{ steps.prep.outputs.owner }}/traefik-stats/traefik-stats-worker:latest
             192.168.1.41:3000/${{ steps.prep.outputs.owner }}/traefik-stats/traefik-stats-worker:${{ steps.prep.outputs.version }}
             192.168.1.41:3000/${{ steps.prep.outputs.owner }}/traefik-stats/traefik-stats-worker:${{ github.sha }}
-          cache-from: type=gha,scope=worker
-          cache-to: type=gha,mode=max,scope=worker
 
       - name: Build app image with cache
         uses: docker/build-push-action@v5
@@ -83,8 +81,6 @@ jobs:
             192.168.1.41:3000/${{ steps.prep.outputs.owner }}/traefik-stats/traefik-stats-app:latest
             192.168.1.41:3000/${{ steps.prep.outputs.owner }}/traefik-stats/traefik-stats-app:${{ steps.prep.outputs.version }}
             192.168.1.41:3000/${{ steps.prep.outputs.owner }}/traefik-stats/traefik-stats-app:${{ github.sha }}
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
 
       - name: Increment version
         if: success()
