@@ -10,6 +10,43 @@ from crowdsec import CrowdSecManager
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
 from cache_service import CacheService, invalidate_cache
+
+@st.cache_data(ttl=120, show_spinner=False)
+def transform_df(_df):
+    if _df.empty:
+        return _df
+    df = _df.copy()
+    if 'start_local' in df.columns and df['start_local'].dtype == 'object':
+        df['start_local'] = pd.to_datetime(df['start_local'])
+    if 'duration' in df.columns:
+        df['duration_ms'] = df['duration'] / 1_000_000
+    if 'status_code' in df.columns:
+        df['status_group'] = df['status_code'].astype(str).str[0] + 'xx'
+    return df
+
+@st.cache_data(ttl=180, show_spinner=False)
+def compute_geo_stats(df):
+    if df.empty:
+        return pd.DataFrame()
+    return df.groupby('country_code').size().reset_index(name='Requests')
+
+@st.cache_data(ttl=180, show_spinner=False)
+def compute_top_hosts(df, n=5):
+    if df.empty:
+        return pd.Series(dtype=int)
+    return df['request_host'].value_counts().head(n)
+
+@st.cache_data(ttl=180, show_spinner=False)
+def compute_status_dist(df):
+    if df.empty:
+        return pd.Series(dtype=int)
+    return df['status_group'].value_counts()
+
+@st.cache_data(ttl=180, show_spinner=False)
+def compute_timeline(df):
+    if df.empty:
+        return pd.DataFrame()
+    return df.set_index('start_local').groupby(pd.Grouper(freq='5min')).size().reset_index(name='Requests')
 from data_service import (
     fetch_data, get_abuse_reputation, get_total_logs_count, fetch_logs_paginated, format_bytes,
     get_login_attempts, get_top_slowest_endpoints, get_error_trends, get_bandwidth_spikes,
@@ -21,6 +58,12 @@ from streamlit_autorefresh import st_autorefresh
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Traefik God Mode Monitor", layout="wide", page_icon="⚡")
+
+st.markdown("""
+<style>
+    .stAppLoading { opacity: 0.5; }
+</style>
+""", unsafe_allow_html=True)
 
 # Custom CSS for God Mode
 st.markdown("""

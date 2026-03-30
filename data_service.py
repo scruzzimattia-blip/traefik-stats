@@ -19,7 +19,7 @@ def get_session():
     finally:
         session.close()
 
-@cached(ttl=60, key_prefix="fetch_data")
+@cached(ttl=120, key_prefix="fetch_data")
 def fetch_data(limit=50000):
     try:
         query = select(AccessLog).order_by(AccessLog.start_local.desc()).limit(limit)
@@ -213,6 +213,7 @@ def get_bandwidth_spikes(hours=24):
         logger.error(f"Bandwidth spikes error: {e}")
         return pd.DataFrame()
 
+@cached(ttl=180, key_prefix="threat_leaders")
 def get_threat_leaders(limit=20):
     cache_key = f"traefik_stats:threat_leaders:{limit}"
     cached = CacheService.get(cache_key)
@@ -288,6 +289,7 @@ def remove_blocked_country(country_code: str):
             logger.error(f"Remove block error: {e}")
         return False
 
+@cached(ttl=60, key_prefix="worker_stats")
 def get_worker_stats(hours=24):
     """Get worker statistics for the last N hours."""
     with get_session() as session:

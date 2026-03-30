@@ -9,3 +9,11 @@ font = "sans serif"
 headless = true
 port = 8501
 address = "0.0.0.0"
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[client]
+caching = true
+toolbarMode = "minimal"
