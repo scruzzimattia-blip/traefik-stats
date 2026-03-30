@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 type CacheEntry struct {
@@ -20,6 +23,7 @@ type CacheEntry struct {
 var (
 	cache      = make(map[string]CacheEntry)
 	cacheMutex sync.RWMutex
+	db         *sql.DB
 )
 
 func getCache(ip string) (bool, string, bool) {
@@ -42,6 +46,19 @@ func setCache(ip string, blocked bool, reason string, duration time.Duration) {
 	}
 }
 
+func logEvent(ip, reason, target, ua string) {
+	if db == nil {
+		return
+	}
+	_, err := db.Exec(
+		"INSERT INTO bouncer_events (timestamp, ip_address, reason, target_url, user_agent) VALUES ($1, $2, $3, $4, $5)",
+		time.Now(), ip, reason, target, ua,
+	)
+	if err != nil {
+		fmt.Printf("Error logging event to DB: %v\n", err)
+	}
+}
+
 func main() {
 	lapiURL := os.Getenv("CROWDSEC_LAPI_URL")
 	if lapiURL == "" {
@@ -53,7 +70,21 @@ func main() {
 		redirectURL = "https://blocked.scruzzi.com"
 	}
 
-	fmt.Println("Starting Updated CrowdSec Bouncer (with Cache) on :8080")
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL != "" {
+		var err error
+		db, err = sql.Open("postgres", dbURL)
+		if err != nil {
+			fmt.Printf("Error connecting to DB: %v\n", err)
+		} else {
+			db.SetMaxOpenConns(5)
+			db.SetMaxIdleConns(2)
+			db.SetConnMaxLifetime(5 * time.Minute)
+			fmt.Println("Connected to Database for Audit Logging")
+		}
+	}
+
+	fmt.Println("Starting Updated CrowdSec Bouncer (with Cache & DB Logging) on :8080")
 	fmt.Printf("LAPI URL: %s\n", lapiURL)
 	fmt.Printf("Redirect URL: %s\n", redirectURL)
 
@@ -75,6 +106,8 @@ func main() {
 			}
 		}
 
+		ua := r.Header.Get("User-Agent")
+
 		// Check cache first
 		if blocked, reason, ok := getCache(clientIP); ok {
 			if blocked {
@@ -82,6 +115,9 @@ func main() {
 				w.Header().Set("X-Crowdsec-Decision", "ban")
 				target := fmt.Sprintf("%s?ip=%s&reason=%s", 
 					redirectURL, clientIP, strings.ReplaceAll(reason, " ", "+"))
+				
+				go logEvent(clientIP, reason, target, ua)
+				
 				http.Redirect(w, r, target, http.StatusFound)
 				return
 			}
@@ -123,6 +159,9 @@ func main() {
 				w.Header().Set("X-Crowdsec-Decision", "ban")
 				target := fmt.Sprintf("%s?ip=%s&reason=%s", 
 					redirectURL, clientIP, strings.ReplaceAll(reason, " ", "+"))
+				
+				go logEvent(clientIP, reason, target, ua)
+				
 				http.Redirect(w, r, target, http.StatusFound)
 				return
 			}

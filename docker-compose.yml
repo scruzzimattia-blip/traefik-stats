@@ -107,6 +107,7 @@ services:
       - CROWDSEC_LAPI_URL=http://traefik-stats-crowdsec:8080
       - CROWDSEC_LAPI_KEY=${CROWDSEC_LAPI_KEY}
       - REDIRECT_URL=https://blocked.scruzzi.com
+      - DATABASE_URL=postgresql://user:password@traefik-stats-db:5432/traefik_stats
     networks:
       - proxy
     ports:
