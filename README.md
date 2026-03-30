@@ -56,7 +56,7 @@ docker-compose up -d
 | `ABUSEIPDB_API_KEY` | AbuseIPDB for IP reputation | - |
 | `REDIS_URL` | Redis for rate limiting | - |
 | `RETENTION_DAYS` | Log retention | `30` |
-| `IGNORED_IPS` | IPs to skip (comma-separated) | `92.106.189.142` |
+| `IGNORED_IPS` | IPs to skip (comma-separated) | - |
 | `ATTACK_PATTERNS` | Custom patterns (comma-separated) | - |
 | `LOG_FORMAT` | `json` for structured logging | - |
 | `DISCORD_WEBHOOK` | Discord notification URL | - |
