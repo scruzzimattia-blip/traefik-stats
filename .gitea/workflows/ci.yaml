@@ -1,4 +1,4 @@
-name: Traefik Stats CI
+name: Traefik Stats CI # Triggering new run after manual cancellation
 
 on:
   push:
