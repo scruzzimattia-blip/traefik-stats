@@ -69,6 +69,7 @@ class AccessLog(Base):
         UniqueConstraint('start_local', 'client_addr', 'request_path', 'request_method', name='_req_uc'),
         Index('idx_host_status', 'request_host', 'status_code'),
         Index('idx_time_host', 'start_local', 'request_host'),
+        Index('idx_attack_time', 'is_attack', 'start_local'),
     )
 
 class RateLimitEntry(Base):
