@@ -87,6 +87,17 @@ services:
     ports:
       - "8082:8080"
 
+  error-page:
+    image: nginx:alpine
+    container_name: traefik-error-page
+    restart: unless-stopped
+    volumes:
+      - ./static:/usr/share/nginx/html:ro
+    networks:
+      - proxy
+    ports:
+      - "8502:80"
+
 networks:
   proxy:
     external: true

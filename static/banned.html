@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 - Access Denied</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        .container {
+            text-align: center;
+            padding: 3rem;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            max-width: 600px;
+            margin: 2rem;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: bold;
+            color: #ef545b;
+            text-shadow: 0 0 30px rgba(239,84,91,0.5);
+            line-height: 1;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin: 1rem 0;
+            color: #00cc96;
+        }
+        .reason-box {
+            background: rgba(239,84,91,0.1);
+            border: 1px solid rgba(239,84,91,0.3);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+        .reason-label {
+            color: #ef545b;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 0.5rem;
+        }
+        .ip-address {
+            color: #888;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+        .footer {
+            margin-top: 2rem;
+            color: #666;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-code">403</div>
+        <h1>Access Denied</h1>
+        
+        <div class="reason-box">
+            <div class="reason-label">Your IP has been blocked</div>
+            <p>Reason: Malicious activity detected by security system</p>
+        </div>
+        
+        <p class="ip-address">Your IP was blocked by CrowdSec</p>
+        
+        <div class="footer">
+            <p>Protected by CrowdSec + Traefik God Mode</p>
+            <p>If you believe this is an error, contact the administrator</p>
+        </div>
+    </div>
+</body>
+</html>
