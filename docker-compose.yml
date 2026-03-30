@@ -95,8 +95,6 @@ services:
       - ./static:/usr/share/nginx/html:ro
     networks:
       - proxy
-    ports:
-      - "8502:80"
 
 networks:
   proxy:
