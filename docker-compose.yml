@@ -11,6 +11,8 @@ services:
       - ./postgres_data:/var/lib/postgresql/data
     networks:
       - proxy
+    labels:
+      - com.lighthouse.enable=true
 
   redis:
     image: redis:7-alpine
@@ -18,6 +20,8 @@ services:
     restart: unless-stopped
     networks:
       - proxy
+    labels:
+      - com.lighthouse.enable=true
 
   worker:
     image: ghcr.io/scruzzimattia-blip/traefik-stats-worker:latest
@@ -85,6 +89,8 @@ services:
       - proxy
     ports:
       - "8082:8080"
+    labels:
+      - com.lighthouse.enable=true
 
   error-page:
     image: nginx:alpine
@@ -94,6 +100,8 @@ services:
       - ./static:/usr/share/nginx/html:ro
     networks:
       - proxy
+    labels:
+      - com.lighthouse.enable=true
 
   bouncer:
     image: debian:bookworm-slim
