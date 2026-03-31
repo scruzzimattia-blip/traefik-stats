@@ -120,7 +120,6 @@ services:
     ports:
       - "8503:8080"
 
-services:
   lighthouse:
     image: ghcr.io/scruzzimattia-blip/lighthouse:latest
     container_name: lighthouse
