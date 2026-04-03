@@ -16,8 +16,12 @@ def transform_df(_df):
     if _df.empty:
         return _df
     df = _df.copy()
-    if 'start_local' in df.columns and df['start_local'].dtype == 'object':
+    if 'start_local' in df.columns:
+        # Convert to datetime and localize to UTC then convert to Zurich
         df['start_local'] = pd.to_datetime(df['start_local'])
+        if df['start_local'].dt.tz is None:
+            df['start_local'] = df['start_local'].dt.tz_localize('UTC')
+        df['start_local'] = df['start_local'].dt.tz_convert('Europe/Zurich')
     if 'duration' in df.columns:
         df['duration_ms'] = df['duration'] / 1_000_000
     if 'status_code' in df.columns:
@@ -100,9 +104,8 @@ if df_full.empty:
     st.warning("⚠️ No traffic data found. God Mode is waiting for logs...")
     if st.button("🔄 Force Sync"): st.rerun()
 else:
-    # Ensure start_local is datetime (sometimes JSON serialization in cache makes it string)
-    if not df_full.empty and isinstance(df_full.iloc[0]['start_local'], str):
-        df_full['start_local'] = pd.to_datetime(df_full['start_local'])
+    # Transform data (localize timestamps to Zurich, etc.)
+    df_full = transform_df(df_full)
     
     # --- SIDEBAR ---
     st.sidebar.title("🎮 Command Center")
@@ -125,7 +128,8 @@ else:
     with st.sidebar.expander("💓 System Pulse", expanded=True):
         if not df_full.empty:
             last_log = df_full.iloc[0]['start_local']
-            diff = (datetime.now() - last_log).total_seconds()
+            # Now last_log is localized to Europe/Zurich, so we can use datetime.now()
+            diff = (datetime.now().replace(tzinfo=None) - last_log.replace(tzinfo=None)).total_seconds()
             status_color = "🟢" if diff < 60 else "🟡" if diff < 300 else "🔴"
             st.write(f"{status_color} **Worker:** {'Active' if diff < 300 else 'Stale'}")
             st.caption(f"Last Log: {last_log.strftime('%H:%M:%S')}")
