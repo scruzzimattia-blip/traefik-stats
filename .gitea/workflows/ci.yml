@@ -40,7 +40,8 @@ jobs:
     needs: test
     env:
       REGISTRY: git.scruzzi.com
-      IMAGE_PREFIX: Mattia/traefik-stats
+      # Docker image names must be lowercase
+      IMAGE_PREFIX: mattia/traefik-stats
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
