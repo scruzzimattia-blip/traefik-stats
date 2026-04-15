@@ -48,12 +48,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Determine whether to push images
+        id: auth
+        run: |
+          if [ -n "${{ secrets.REGISTRY_PASSWORD }}" ] || [ -n "${{ secrets.GITHUB_TOKEN }}" ] || [ -n "${{ secrets.GITEA_TOKEN }}" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Login to registry
         uses: docker/login-action@v3
+        if: steps.auth.outputs.push == 'true'
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN || secrets.GITEA_TOKEN }}
 
       - name: Get version
         id: prep
@@ -70,7 +80,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.worker
-          push: true
+          push: ${{ steps.auth.outputs.push == 'true' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ steps.prep.outputs.version }}
@@ -80,7 +90,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: ${{ steps.auth.outputs.push == 'true' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-app:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-app:${{ steps.prep.outputs.version }}
